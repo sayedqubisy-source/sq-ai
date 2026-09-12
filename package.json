@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node --import ./runtime-fix.mjs server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch --import ./runtime-fix.mjs server.js"
   },
   "dependencies": {
     "express": "^5.1.0",
