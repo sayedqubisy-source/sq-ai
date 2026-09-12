@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server.js",
+    "start": "node --input-type=module -e \"process.env.AI_TEXT_PROVIDER=process.env.AI_TEXT_PROVIDER||'openrouter'; process.env.AI_VIDEO_PROVIDER=process.env.AI_VIDEO_PROVIDER||'openrouter'; process.env.OPENROUTER_MODEL='nvidia/nemotron-3-super-120b-a12b:free'; import('./server.js')\"",
     "dev": "node --watch server.js"
   },
   "dependencies": {
