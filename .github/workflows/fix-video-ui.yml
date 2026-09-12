@@ -1,0 +1,130 @@
+name: One-time SQ AI video UI fix
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: "!contains(github.event.head_commit.message, '[video-ui-fix]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch video generation UI
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('public/index.html')
+          text = path.read_text(encoding='utf-8')
+
+          pattern = r"async function generateTool\(category, toolId\) \{.*?\n\}\n\nfunction extractOutput\(data\) \{"
+          replacement = r'''async function pollVideoJob(jobId, result, actions) {
+  const maxAttempts = 100;
+  const delayMs = 3000;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    result.textContent = `Generating your video... ${Math.min(attempt, maxAttempts)}/${maxAttempts}`;
+
+    const response = await fetch(`/api/video/jobs/${encodeURIComponent(jobId)}`, {
+      credentials: "include",
+      headers: { Accept: "application/json" }
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      throw new Error(data.message || data.error || `Video status request failed (${response.status}).`);
+    }
+
+    const status = String(data.status || "").toLowerCase();
+    if (status === "completed" || data.ready === true) {
+      result.innerHTML = "";
+
+      const video = document.createElement("video");
+      video.controls = true;
+      video.playsInline = true;
+      video.preload = "metadata";
+      video.style.width = "100%";
+      video.style.maxHeight = "620px";
+      video.style.borderRadius = "16px";
+      video.style.background = "#000";
+      video.src = `/api/video/jobs/${encodeURIComponent(jobId)}/content?index=0`;
+      video.dataset.videoUrl = video.src;
+
+      result.appendChild(video);
+      actions.classList.remove("hidden");
+      return data;
+    }
+
+    if (["failed", "cancelled", "canceled", "expired"].includes(status)) {
+      throw new Error(data.error || data.message || `Video generation ${status}.`);
+    }
+
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+
+  throw new Error("Video generation timed out. Please try again.");
+}
+
+async function generateTool(category, toolId) {
+  const input = document.getElementById(`${category}ToolInput`).value.trim();
+  const result = document.getElementById(`${category}Result`);
+  const button = document.getElementById(`${category}GenerateButton`);
+  const actions = document.getElementById(`${category}ResultActions`);
+
+  if (!input) {
+    showToast("Write what you want to create first.");
+    return;
+  }
+
+  button.classList.add("loading");
+  button.textContent = "Generating...";
+  actions.classList.add("hidden");
+  result.textContent = "Creating your result...";
+
+  try {
+    const data = await API.generateTool({
+      tool: toolId,
+      type: category,
+      input,
+      prompt: input
+    });
+
+    if (data?.video_job) {
+      await pollVideoJob(data.video_job, result, actions);
+      await refreshData();
+      return;
+    }
+
+    const output = extractOutput(data);
+
+    result.textContent =
+      output ||
+      "The AI returned an empty result.";
+
+    actions.classList.remove("hidden");
+    await refreshData();
+  } catch (err) {
+    result.textContent = `Error: ${err.message}`;
+  } finally {
+    button.classList.remove("loading");
+    button.textContent = "Generate";
+  }
+}
+
+function extractOutput(data) {'''
+
+          updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit('Could not locate generateTool block')
+
+          path.write_text(updated, encoding='utf-8')
+          print('patched public/index.html')
+          PY
+          rm -f .github/workflows/fix-video-ui.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/index.html .github/workflows/fix-video-ui.yml
+          git commit -m "Fix video generation UI [video-ui-fix]"
+          git push
