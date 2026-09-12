@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --input-type=module -e \"process.env.AI_TEXT_PROVIDER=process.env.AI_TEXT_PROVIDER||'openrouter'; process.env.AI_VIDEO_PROVIDER=process.env.AI_VIDEO_PROVIDER||'openrouter'; process.env.OPENROUTER_MODEL=process.env.OPENROUTER_MODEL||'openrouter/free'; import('./server.js')\"",
+    "start": "node --import ./runtime-fix.mjs server.js",
     "dev": "node --watch server.js"
   },
   "dependencies": {
