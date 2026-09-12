@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --input-type=module -e \"process.env.AI_TEXT_PROVIDER=process.env.AI_TEXT_PROVIDER||'openrouter'; process.env.AI_VIDEO_PROVIDER=process.env.AI_VIDEO_PROVIDER||'openrouter'; process.env.OPENROUTER_MODEL='nvidia/nemotron-3-super-120b-a12b:free'; import('./server.js')\"",
+    "start": "node --input-type=module -e \"process.env.AI_TEXT_PROVIDER=process.env.AI_TEXT_PROVIDER||'openrouter'; process.env.AI_VIDEO_PROVIDER=process.env.AI_VIDEO_PROVIDER||'openrouter'; process.env.OPENROUTER_MODEL='nvidia/nemotron-3-super-120b-a12b:free'; const fs=await import('fs'); const p='server.js'; let s=fs.readFileSync(p,'utf8'); const old=\"res.json({ data:result.output, provider:result.provider, model:result.model, credits_remaining:getUserById(req.user.id).credits });\"; const next=\"res.json({ data:result.output, output:result.output, provider:result.provider, model:result.model, credits_remaining:getUserById(req.user.id).credits });\"; if(s.includes(old)) fs.writeFileSync(p,s.replace(old,next)); import('./server.js')\"",
     "dev": "node --watch server.js"
   },
   "dependencies": {
