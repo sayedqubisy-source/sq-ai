@@ -140,6 +140,84 @@ function spendCredit(userId, endpoint, tool) {
   return true;
 }
 
+const VIDEO_UI_PATCH = `
+<script>
+(function () {
+  async function pollVideoJob(jobId, result, actions) {
+    const maxAttempts = 100;
+    const delayMs = 3000;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      result.textContent = 'Generating your video... ' + attempt + '/' + maxAttempts;
+      const response = await fetch('/api/video/jobs/' + encodeURIComponent(jobId), {
+        credentials: 'include',
+        headers: { Accept: 'application/json' }
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || data.error || 'Video status request failed.');
+      const status = String(data.status || '').toLowerCase();
+      if (status === 'completed' || data.ready === true) {
+        result.innerHTML = '';
+        const video = document.createElement('video');
+        video.controls = true;
+        video.playsInline = true;
+        video.preload = 'metadata';
+        video.style.width = '100%';
+        video.style.maxHeight = '620px';
+        video.style.borderRadius = '16px';
+        video.style.background = '#000';
+        video.src = '/api/video/jobs/' + encodeURIComponent(jobId) + '/content?index=0';
+        result.appendChild(video);
+        actions.classList.remove('hidden');
+        return data;
+      }
+      if (['failed', 'cancelled', 'canceled', 'expired'].includes(status)) {
+        throw new Error(data.error || data.message || 'Video generation failed.');
+      }
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+    throw new Error('Video generation timed out. Please try again.');
+  }
+
+  window.generateTool = async function (category, toolId) {
+    const input = document.getElementById(category + 'ToolInput').value.trim();
+    const result = document.getElementById(category + 'Result');
+    const button = document.getElementById(category + 'GenerateButton');
+    const actions = document.getElementById(category + 'ResultActions');
+    if (!input) {
+      showToast('Write what you want to create first.');
+      return;
+    }
+    button.classList.add('loading');
+    button.textContent = 'Generating...';
+    actions.classList.add('hidden');
+    result.textContent = 'Creating your result...';
+    try {
+      const data = await API.generateTool({ tool: toolId, type: category, input, prompt: input });
+      if (data && data.video_job) {
+        await pollVideoJob(data.video_job, result, actions);
+        await refreshData();
+        return;
+      }
+      const output = typeof extractOutput === 'function' ? extractOutput(data) : (data && (data.output || data.result || data.text || data.content || data.message || ''));
+      result.textContent = output || 'The AI returned an empty result.';
+      actions.classList.remove('hidden');
+      await refreshData();
+    } catch (err) {
+      result.textContent = 'Error: ' + (err.message || err);
+    } finally {
+      button.classList.remove('loading');
+      button.textContent = 'Generate';
+    }
+  };
+})();
+</script>`;
+
+app.get(['/', '/index.html'], (req, res, next) => {
+  fs.readFile(path.join(process.cwd(), 'public', 'index.html'), 'utf8', (error, html) => {
+    if (error) return next(error);
+    res.type('html').send(html.replace('</body>', VIDEO_UI_PATCH + '</body>'));
+  });
+});
 app.use(express.static('public'));
 app.get('/api/health', (req, res) => res.json({ ok: true, service: 'SQ AI', version: '3.2.0' }));
 app.get('/api/plans', (req, res) => res.json(plans));
@@ -318,14 +396,7 @@ async function getOpenRouterVideoJob(jobId) {
     try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw_response: raw.slice(0,2000) }; }
     if (!response.ok) {
       console.error('openrouter_video_status_error', response.status, data);
-      return {
-        ok:false,
-        error:'video_job_status_failed',
-        message:data?.error?.message || data?.message || `OpenRouter returned HTTP ${response.status} while checking the video job.`,
-        status:response.status,
-        upstream_status:response.status,
-        details:data
-      };
+      return { ok:false, error:'video_job_status_failed', message:data?.error?.message || data?.message || `OpenRouter returned HTTP ${response.status} while checking the video job.`, status:response.status, upstream_status:response.status, details:data };
     }
     return { ok:true, ...data };
   } catch (error) {
@@ -415,7 +486,7 @@ app.post('/api/tools/generate', auth, async (req,res) => {
   const result = await aiEngine({ tool, type:requestedType || tool.category, input, request:req.body });
   if (!result.ok) return res.status(result.status || 503).json(result);
   if (!spendCredit(req.user.id,'/api/tools/generate',tool.id)) return res.status(402).json({ error:'credits_exhausted' });
-  if (result.job_id) return res.status(202).json({ video_job:result.job_id, status:result.status, polling_url:result.polling_url || `/api/video/jobs/${encodeURIComponent(result.job_id)}`, provider:result.provider, model:result.model, options:result.options, credits_remaining:getUserById(req.user.id).credits });
+  if (result.job_id) return res.status(202).json({ video_job:result.job_id, status:result.status, polling_url:`/api/video/jobs/${encodeURIComponent(result.job_id)}`, provider:result.provider, model:result.model, options:result.options, credits_remaining:getUserById(req.user.id).credits });
   res.json({ data:result.output, provider:result.provider, model:result.model, credits_remaining:getUserById(req.user.id).credits });
 });
 
