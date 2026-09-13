@@ -50,6 +50,84 @@ function platformAspect(platform) {
   return process.env.VIDEO_ASPECT_RATIO || '9:16';
 }
 
+function freeSpaceAspect(platform) {
+  const aspect = platformAspect(platform);
+  if (aspect === '16:9') return '832x480';
+  if (aspect === '1:1') return '640x640';
+  return '480x832';
+}
+
+function findVideoUrl(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return /^https?:\/\//.test(value) ? value : null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findVideoUrl(item);
+      if (found) return found;
+    }
+  }
+  if (typeof value === 'object') {
+    for (const key of ['url', 'video_url', 'path', 'name']) {
+      const found = findVideoUrl(value[key]);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+async function generateFreeHuggingFaceSpaceVideo(payload) {
+  const space = process.env.FREE_VIDEO_SPACE || 'alexcheng0072/wan27-free-video-generator';
+  const base = `https://${space.replace(/\/$/, '')}.hf.space`;
+  const prompt = String(payload.prompt || '').slice(0, 600);
+  const aspect = freeSpaceAspect(payload.platform);
+  const duration = Math.min(5, Math.max(2, Number(process.env.FREE_VIDEO_DURATION_SECONDS || 3)));
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 180000);
+  try {
+    const submit = await originalFetch(`${base}/gradio_api/call/generate_video`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: [null, prompt, aspect, duration] }),
+      signal: controller.signal
+    });
+    const submitRaw = await submit.text();
+    let submitted = {};
+    try { submitted = JSON.parse(submitRaw); } catch {}
+    if (!submit.ok) throw new Error(submitted?.error || `Free video Space rejected the request (${submit.status}).`);
+    const eventId = submitted?.event_id;
+    if (!eventId) throw new Error('Free video Space did not return an event id.');
+
+    const stream = await originalFetch(`${base}/gradio_api/call/generate_video/${encodeURIComponent(eventId)}`, {
+      method: 'GET',
+      headers: { Accept: 'text/event-stream' },
+      signal: controller.signal
+    });
+    if (!stream.ok) throw new Error(`Free video Space status request failed (${stream.status}).`);
+    const text = await stream.text();
+    const lines = text.split(/\r?\n/).filter(Boolean);
+    let finalData = null;
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      const raw = line.slice(5).trim();
+      if (raw === '[DONE]') continue;
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) finalData = parsed;
+        else if (parsed?.data) finalData = parsed.data;
+      } catch {}
+    }
+    const videoUrl = findVideoUrl(finalData);
+    if (!videoUrl) throw new Error('Free video Space finished without a video URL.');
+    return new Response(JSON.stringify({ provider: 'huggingface-zero-gpu', model: 'FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers', video_url: videoUrl, status: 'completed', free: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  } catch (error) {
+    if (error?.name === 'AbortError') return new Response(JSON.stringify({ error: { code: 'free_video_timeout', message: 'The free video GPU queue timed out. Try again later.' } }), { status: 504, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ error: { code: 'free_video_unavailable', message: error?.message || 'The free video service is temporarily unavailable.' } }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function downloadOpenRouterVideo(jobId, key) {
   const response = await originalFetch(`https://openrouter.ai/api/v1/videos/${encodeURIComponent(jobId)}/content`, {
     method: 'GET',
@@ -70,6 +148,12 @@ async function downloadOpenRouterVideo(jobId, key) {
 }
 
 async function generateOpenRouterVideo(payload, headers) {
+  // Default to the public Hugging Face ZeroGPU Space so the first video test
+  // does not require a paid API balance. Paid OpenRouter video is opt-in.
+  if (process.env.PAID_VIDEO_ENABLED !== 'true') {
+    return generateFreeHuggingFaceSpaceVideo(payload);
+  }
+
   const key = headers.get('authorization')?.replace(/^Bearer\s+/i, '') || process.env.OPENROUTER_API_KEY;
   if (!key) return new Response(JSON.stringify({ error: { code: 'openrouter_not_configured', message: 'OPENROUTER_API_KEY is not configured.' } }), { status: 503, headers: { 'Content-Type': 'application/json' } });
 
@@ -96,9 +180,7 @@ async function generateOpenRouterVideo(payload, headers) {
   const submitRaw = await submit.text();
   let job;
   try { job = JSON.parse(submitRaw); } catch { job = {}; }
-  if (!submit.ok) {
-    return new Response(JSON.stringify({ error: { code: 'video_provider_request_failed', message: job?.error?.message || `OpenRouter video submission failed (${submit.status})` } }), { status: submit.status, headers: { 'Content-Type': 'application/json' } });
-  }
+  if (!submit.ok) return new Response(JSON.stringify({ error: { code: 'video_provider_request_failed', message: job?.error?.message || `OpenRouter video submission failed (${submit.status})` } }), { status: submit.status, headers: { 'Content-Type': 'application/json' } });
 
   const jobId = job?.id || job?.video_id || job?.job_id;
   if (!jobId) return new Response(JSON.stringify({ error: { code: 'video_provider_invalid_output', message: 'OpenRouter did not return a video job id.' } }), { status: 502, headers: { 'Content-Type': 'application/json' } });
@@ -107,10 +189,7 @@ async function generateOpenRouterVideo(payload, headers) {
   let lastStatus = 'queued';
   while (Date.now() < deadline) {
     await sleep(Number(process.env.VIDEO_POLL_MS || 10000));
-    const statusResponse = await originalFetch(`https://openrouter.ai/api/v1/videos/${encodeURIComponent(jobId)}`, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${key}` }
-    });
+    const statusResponse = await originalFetch(`https://openrouter.ai/api/v1/videos/${encodeURIComponent(jobId)}`, { method: 'GET', headers: { Authorization: `Bearer ${key}` } });
     const raw = await statusResponse.text();
     let state;
     try { state = JSON.parse(raw); } catch { state = {}; }
@@ -123,9 +202,7 @@ async function generateOpenRouterVideo(payload, headers) {
       const videoUrl = await downloadOpenRouterVideo(jobId, key);
       return new Response(JSON.stringify({ provider: 'openrouter', model, video_url: videoUrl, status: 'completed', job_id: jobId }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
-    if (['failed', 'cancelled', 'expired'].includes(lastStatus)) {
-      return new Response(JSON.stringify({ error: { code: 'video_generation_failed', message: state?.error?.message || `Video generation ${lastStatus}.` } }), { status: 502, headers: { 'Content-Type': 'application/json' } });
-    }
+    if (['failed', 'cancelled', 'expired'].includes(lastStatus)) return new Response(JSON.stringify({ error: { code: 'video_generation_failed', message: state?.error?.message || `Video generation ${lastStatus}.` } }), { status: 502, headers: { 'Content-Type': 'application/json' } });
   }
   return new Response(JSON.stringify({ error: { code: 'video_provider_timeout', message: `Video generation timed out while status was ${lastStatus}.` } }), { status: 504, headers: { 'Content-Type': 'application/json' } });
 }
@@ -133,7 +210,6 @@ async function generateOpenRouterVideo(payload, headers) {
 async function safeFetch(input, init = {}) {
   const url = typeof input === 'string' ? input : input?.url || '';
   if (!isOpenRouter(url)) return originalFetch(input, init);
-
   const method = String(init.method || 'GET').toUpperCase();
   const isChat = url.endsWith('/chat/completions') && method === 'POST';
   const isVideoSubmit = url.endsWith('/videos') && method === 'POST';
@@ -195,9 +271,7 @@ process.env.AI_TEXT_PROVIDER = process.env.AI_TEXT_PROVIDER || 'openrouter';
 process.env.AI_VIDEO_PROVIDER = process.env.AI_VIDEO_PROVIDER || 'openrouter';
 process.env.OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'openrouter/free';
 process.env.VIDEO_API_URL = process.env.VIDEO_API_URL || 'https://openrouter.ai/api/v1/videos';
-process.env.VIDEO_API_KEY = process.env.VIDEO_API_KEY || process.env.OPENROUTER_API_KEY || '';
-process.env.VIDEO_MODEL = process.env.VIDEO_MODEL || process.env.OPENROUTER_VIDEO_MODEL || 'bytedance/seedance-2.0-mini';
-process.env.VIDEO_DURATION_SECONDS = process.env.VIDEO_DURATION_SECONDS || '4';
-process.env.VIDEO_RESOLUTION = process.env.VIDEO_RESOLUTION || '720p';
-process.env.VIDEO_MAX_WAIT_MS = process.env.VIDEO_MAX_WAIT_MS || '360000';
-process.env.VIDEO_POLL_MS = process.env.VIDEO_POLL_MS || '10000';
+process.env.VIDEO_API_KEY = process.env.VIDEO_API_KEY || process.env.OPENROUTER_API_KEY || 'free';
+process.env.VIDEO_MODEL = process.env.VIDEO_MODEL || process.env.OPENROUTER_VIDEO_MODEL || 'free-hf-zerogpu';
+process.env.FREE_VIDEO_DURATION_SECONDS = process.env.FREE_VIDEO_DURATION_SECONDS || '3';
+process.env.PAID_VIDEO_ENABLED = process.env.PAID_VIDEO_ENABLED || 'false';
