@@ -19,12 +19,15 @@ function generatedVideoDir() {
 
 function findFile(value) {
   if (!value) return null;
-  if (typeof value === 'string') return value;
+  if (typeof value === 'string') {
+    if (/\.(mp4|webm|mov)(\?|$)/i.test(value) || /gradio_api\/file|\.hf\.space/i.test(value)) return value;
+    return null;
+  }
   if (Array.isArray(value)) {
     for (const item of value) { const found = findFile(item); if (found) return found; }
   }
   if (typeof value === 'object') {
-    for (const key of ['url', 'video_url', 'path', 'name']) {
+    for (const key of ['video_url', 'url', 'path', 'name']) {
       const found = findFile(value[key]);
       if (found) return found;
     }
@@ -42,14 +45,10 @@ async function freeVideo(payload) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 240000);
   try {
-    // Current public Space exposes these 10 API inputs:
-    // image, prompt, height, width, negative_prompt, duration, guidance, steps, seed, randomize_seed.
     const inputData = [null, prompt, height, width, negativePrompt, duration, 0, 4, 42, true];
     const submit = await previousFetch(`${base}/gradio_api/call/generate_video`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ data: inputData }),
-      signal: controller.signal
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ data: inputData }), signal: controller.signal
     });
     const raw = await submit.text();
     let data = {}; try { data = JSON.parse(raw); } catch {}
@@ -79,11 +78,16 @@ async function freeVideo(payload) {
     if (!file) throw new Error('Free video service finished without a video file.');
 
     let fileUrl = file;
-    if (!/^https?:\/\//i.test(fileUrl)) fileUrl = `${base}/gradio_api/file=${encodeURIComponent(fileUrl)}`;
+    if (!/^https?:\/\//i.test(fileUrl)) {
+      fileUrl = `${base}/gradio_api/file=${encodeURIComponent(fileUrl)}`;
+    }
     const video = await previousFetch(fileUrl, { signal: controller.signal });
     if (!video.ok) throw new Error(`Generated video download failed (${video.status}).`);
     const bytes = Buffer.from(await video.arrayBuffer());
-    if (!bytes.length) throw new Error('Generated video file was empty.');
+    const contentType = video.headers.get('content-type') || '';
+    if (!bytes.length || (!contentType.includes('video') && bytes.slice(0, 32).toString().includes('<!DOCTYPE'))) {
+      throw new Error('Generated video download did not return a valid video.');
+    }
     const filename = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}.mp4`;
     fs.writeFileSync(path.join(generatedVideoDir(), filename), bytes);
     return new Response(JSON.stringify({ provider: 'huggingface-zero-gpu', model: 'FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers', video_url: `/generated-videos/${filename}`, status: 'completed', free: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
