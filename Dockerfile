@@ -8,4 +8,4 @@ ENV FREE_VIDEO_SPACE=alexcheng0072/wan27-free-video-generator
 ENV FREE_VIDEO_DURATION_SECONDS=3
 ENV PAID_VIDEO_ENABLED=false
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["node", "--import", "./billing-fix.mjs", "--import", "./ui-fix.mjs", "--import", "./video-fix.mjs", "--import", "./video-jobs-fix.mjs", "server.js"]
