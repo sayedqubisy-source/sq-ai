@@ -3,7 +3,6 @@ import Database from 'better-sqlite3';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { promisify } from 'util';
 import { InferenceClient } from '@huggingface/inference';
 
 const app = express();
@@ -26,7 +25,6 @@ fs.mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });
 const db = new Database(dbPath);
 db.pragma('journal_mode=WAL');
 
-// Safe, additive schema migration: existing databases are preserved.
 db.exec(`
   CREATE TABLE IF NOT EXISTS users(
     id INTEGER PRIMARY KEY,
@@ -91,7 +89,8 @@ async function verifyPassword(password, stored) {
   if (!stored?.startsWith('scrypt:')) return false;
   const [, saltHex, keyHex] = stored.split(':');
   const original = Buffer.from(keyHex || '', 'hex');
-  const key = await new Promise((resolve, reject) => crypto.scrypt(password, Buffer.from(saltHex || '', 'hex'), original.length, { N: 16384, r: 8, p: 1 }, (e, k) => e ? reject(e) : resolve(k)));
+  if (!original.length || !saltHex) return false;
+  const key = await new Promise((resolve, reject) => crypto.scrypt(password, Buffer.from(saltHex, 'hex'), original.length, { N: 16384, r: 8, p: 1 }, (e, k) => e ? reject(e) : resolve(k)));
   return original.length === key.length && crypto.timingSafeEqual(original, key);
 }
 function parseCookies(req) {
@@ -183,10 +182,10 @@ async function secureVideoGenerate({ tool, prompt, language, platform }) {
   if (!url || !key) throw Object.assign(new Error('video_provider_not_configured'), { code:'video_provider_not_configured' });
   let endpoint; try { endpoint = new URL(url); } catch { throw Object.assign(new Error('video_provider_url_invalid'), { code:'video_provider_url_invalid' }); }
   if (!['https:','http:'].includes(endpoint.protocol)) throw Object.assign(new Error('video_provider_url_invalid'), { code:'video_provider_url_invalid' });
-  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 120000);
+  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 300000);
   try {
     const body = { tool, prompt:normalizedPrompt, language:language || 'English', platform:platform || 'General' };
-    if (process.env.VIDEO_MODEL) body.model = process.env.VIDEO_MODEL;
+    if (process.env.VIDEO_MODEL && process.env.PAID_VIDEO_ENABLED === 'true') body.model = process.env.VIDEO_MODEL;
     const r = await fetch(endpoint, { method:'POST', headers:{ Authorization:`Bearer ${key}`, 'Content-Type':'application/json', 'X-Title':'SQ AI' }, body:JSON.stringify(body), signal:controller.signal });
     const data = await r.json().catch(()=>({}));
     if (!r.ok) throw Object.assign(new Error(data?.error?.message || data?.message || 'video_provider_request_failed'), { code:'video_provider_request_failed', status:r.status });
@@ -196,6 +195,7 @@ async function secureVideoGenerate({ tool, prompt, language, platform }) {
     throw e;
   } finally { clearTimeout(timer); }
 }
+
 function consumeCredit(userId, endpoint) {
   const tx = db.transaction(() => {
     const u = db.prepare('SELECT credits FROM users WHERE id=?').get(userId);
@@ -206,50 +206,66 @@ function consumeCredit(userId, endpoint) {
   }); return tx();
 }
 
-app.get('/api/health', (req,res)=>res.json({ ok:true, service:'SQ AI', version:'3.4.0' }));
+const TOOL_ALIASES = {
+  video_script:'script-video', ad_video:'ad-video', product_video:'product-video', shorts:'reels',
+  long_to_shorts:'long-shorts', hooks:'hooks-video', voiceover:'voiceover', subtitles:'subtitles',
+  image_prompt:'text-image', product_image:'product-image', ad_creative:'ad-creative', thumbnail:'thumbnail',
+  background:'background', variations:'variations'
+};
+const imageTools = new Set(['text-image','product-image','ad-creative','background','enhance','thumbnail','social-image','variations']);
+const videoTools = new Set(['text-video','image-video','ad-video','product-video','reels','long-shorts','script-video','voiceover','subtitles','translation','resize','silence','noise','hooks-video']);
+
+app.get('/api/health', (req,res)=>res.json({ ok:true, service:'SQ AI', version:'3.5.0', video_mode:process.env.PAID_VIDEO_ENABLED === 'true' ? 'paid' : 'free' }));
 app.get('/api/plans', (req,res)=>res.json(plans));
 app.post('/api/auth/signup', async (req,res)=>{
   try {
     const email=String(req.body.email||'').trim().toLowerCase(), password=String(req.body.password||''), name=limitText(req.body.name,100);
     if(!validEmail(email)) return res.status(400).json({error:'valid_email_required'});
-    if(password.length<8) return res.status(400).json({error:'password_min_8_characters'});
-    if(db.prepare('SELECT id FROM users WHERE email=?').get(email)) return res.status(409).json({error:'email_already_registered'});
-    const hash=await hashPassword(password); const r=db.prepare("INSERT INTO users(email,name,password_hash,plan,credits) VALUES(?,?,?,'starter',?)").run(email,name,hash,plans.starter.credits);
-    const token=makeToken(); db.prepare("INSERT INTO sessions(user_id,token_hash,expires_at) VALUES(?,?,datetime('now','+30 days'))").run(r.lastInsertRowid,hashToken(token)); setSessionCookie(res,token); res.status(201).json({user:publicUser(getUserById(r.lastInsertRowid))});
-  } catch(e){ console.error(e); res.status(500).json({error:'signup_failed'}); }
+    if(password.length<8)return res.status(400).json({error:'password_min_8_characters'});
+    if(db.prepare('SELECT id FROM users WHERE email=?').get(email))return res.status(409).json({error:'email_already_registered'});
+    const hash=await hashPassword(password);const r=db.prepare("INSERT INTO users(email,name,password_hash,plan,credits) VALUES(?,?,?,'starter',?)").run(email,name,hash,plans.starter.credits);
+    const token=makeToken();db.prepare("INSERT INTO sessions(user_id,token_hash,expires_at) VALUES(?,?,datetime('now','+30 days'))").run(r.lastInsertRowid,hashToken(token));setSessionCookie(res,token);res.status(201).json({user:publicUser(getUserById(r.lastInsertRowid))});
+  }catch(e){console.error(e);res.status(500).json({error:'signup_failed'});}
 });
-app.post('/api/auth/login',async(req,res)=>{ try { const email=String(req.body.email||'').trim().toLowerCase(), password=String(req.body.password||''); const u=db.prepare('SELECT * FROM users WHERE email=?').get(email); if(!u || !u.password_hash || !(await verifyPassword(password,u.password_hash))) return res.status(401).json({error:'invalid_email_or_password'}); const token=makeToken(); db.prepare("INSERT INTO sessions(user_id,token_hash,expires_at) VALUES(?,?,datetime('now','+30 days'))").run(u.id,hashToken(token)); setSessionCookie(res,token); res.json({user:publicUser(u)}); } catch(e){res.status(500).json({error:'login_failed'});} });
+app.post('/api/auth/login',async(req,res)=>{try{const email=String(req.body.email||'').trim().toLowerCase(),password=String(req.body.password||'');const u=db.prepare('SELECT * FROM users WHERE email=?').get(email);if(!u||!u.password_hash||!(await verifyPassword(password,u.password_hash)))return res.status(401).json({error:'invalid_email_or_password'});const token=makeToken();db.prepare("INSERT INTO sessions(user_id,token_hash,expires_at) VALUES(?,?,datetime('now','+30 days'))").run(u.id,hashToken(token));setSessionCookie(res,token);res.json({user:publicUser(u)});}catch(e){console.error(e);res.status(500).json({error:'login_failed'});}});
 app.post('/api/auth/logout',(req,res)=>{const token=parseCookies(req).sqai_session;if(token)db.prepare('DELETE FROM sessions WHERE token_hash=?').run(hashToken(token));clearSessionCookie(res);res.json({ok:true});});
 app.get('/api/me',auth,(req,res)=>res.json({user:publicUser(getUserById(req.user.id))}));
 app.post('/api/auth/set-password',auth,async(req,res)=>{const password=String(req.body.password||'');if(password.length<8)return res.status(400).json({error:'password_min_8_characters'});db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(await hashPassword(password),req.user.id);res.json({ok:true});});
+app.patch('/api/account',auth,async(req,res,next)=>{try{const name=limitText(req.body.name,100);db.prepare('UPDATE users SET name=? WHERE id=?').run(name,req.user.id);res.json({user:publicUser(getUserById(req.user.id))});}catch(e){next(e);}});
 app.post('/api/signup',(req,res)=>res.status(410).json({error:'legacy_signup_disabled',message:'Use /api/auth/signup.'}));
 app.get('/api/usage',auth,(req,res)=>{const u=db.prepare('SELECT credits FROM users WHERE id=?').get(req.user.id);const total=db.prepare('SELECT COALESCE(SUM(units),0) n FROM usage WHERE user_id=?').get(req.user.id).n;res.json({credits:u.credits,total_units:total});});
 app.get('/api/projects',auth,(req,res)=>res.json({projects:db.prepare('SELECT id,title,content,type,created_at FROM projects WHERE user_id=? ORDER BY id DESC LIMIT 100').all(req.user.id)}));
 app.post('/api/projects',auth,(req,res)=>{const title=limitText(req.body.title,200)||'Untitled',content=limitText(req.body.content,20000),type=limitText(req.body.type,50)||'Project';if(!content)return res.status(400).json({error:'content_required'});const r=db.prepare('INSERT INTO projects(user_id,title,content,type) VALUES(?,?,?,?)').run(req.user.id,title,content,type);res.status(201).json({project:db.prepare('SELECT id,title,content,type,created_at FROM projects WHERE id=?').get(r.lastInsertRowid)});});
+app.delete('/api/projects/:id',auth,(req,res)=>{const id=Number(req.params.id);if(!Number.isInteger(id))return res.status(400).json({error:'invalid_project_id'});const r=db.prepare('DELETE FROM projects WHERE id=? AND user_id=?').run(id,req.user.id);if(!r.changes)return res.status(404).json({error:'project_not_found'});res.json({ok:true});});
 
 app.post('/api/tools/generate',auth,async(req,res,next)=>{
-  try {
+  try{
     if(req.user.credits<1)return res.status(402).json({error:'credits_exhausted'});
-    const tool=limitText(req.body.tool,80),prompt=limitText(req.body.prompt,6000),language=limitText(req.body.language,50),platform=limitText(req.body.platform,50);
+    const rawTool=limitText(req.body.tool,80),tool=TOOL_ALIASES[rawTool]||rawTool,prompt=limitText(req.body.prompt||req.body.input,6000),language=limitText(req.body.language,50),platform=limitText(req.body.platform,50);
     if(!tool||!prompt)return res.status(400).json({error:'tool_and_prompt_required'});
-    const imageTools=new Set(['text-image','product-image','ad-creative','background','enhance','thumbnail','social-image','variations']);
-    const videoTools=new Set(['text-video','image-video','ad-video','product-video','reels','long-shorts','script-video','voiceover','subtitles','translation','resize','silence','noise','hooks-video']);
-    let result;
     if(videoTools.has(tool)){
       const data=await secureVideoGenerate({tool,prompt,language,platform});
       const videoUrl=data?.video_url||data?.url||data?.output?.video_url||data?.output?.url||(Array.isArray(data?.output)?data.output.find(x=>typeof x==='string'&&/^https?:\/\//.test(x)):null);
       if(!videoUrl)return res.status(502).json({error:'video_provider_invalid_output'});
       if(!consumeCredit(req.user.id,`tool:${tool}`))return res.status(402).json({error:'credits_exhausted'});
-      const fresh=db.prepare('SELECT credits FROM users WHERE id=?').get(req.user.id);return res.json({result:videoUrl,video_url:videoUrl,provider:data?.provider||'custom',model:data?.model||null,credits_remaining:fresh.credits});
+      const fresh=db.prepare('SELECT credits FROM users WHERE id=?').get(req.user.id);
+      return res.json({result:videoUrl,video_url:videoUrl,provider:data?.provider||'custom',model:data?.model||null,free:data?.free===true,credits_remaining:fresh.credits});
     }
-    if(imageTools.has(tool)){const data=await openRouterImage(`${prompt}\nPlatform: ${platform||'general'}\nLanguage/context: ${language||'English'}`,process.env.OPENROUTER_IMAGE_MODEL);const first=data?.data?.[0];if(!first?.b64_json)throw Object.assign(new Error('image_data_missing'),{code:'image_data_missing'});result=`data:${first.media_type||'image/png'};base64,${first.b64_json}`;}
-    else result=await openRouterChat([{role:'system',content:`You are SQ AI, a professional creative assistant. Generate useful, specific output for the requested tool. Tool: ${tool}. Return only the finished result, no meta commentary.`},{role:'user',content:`Request: ${prompt}\nLanguage: ${language||'English'}\nPlatform: ${platform||'General'}`}],process.env.OPENROUTER_MODEL);
+    if(imageTools.has(tool)){
+      const data=await openRouterImage(`${prompt}\nPlatform: ${platform||'general'}\nLanguage/context: ${language||'English'}`,process.env.OPENROUTER_IMAGE_MODEL);const first=data?.data?.[0];
+      if(!first?.b64_json&&!first?.url)throw Object.assign(new Error('image_data_missing'),{code:'image_data_missing'});
+      const imageResult=first.b64_json?`data:${first.media_type||'image/png'};base64,${first.b64_json}`:first.url;
+      if(!consumeCredit(req.user.id,`tool:${tool}`))return res.status(402).json({error:'credits_exhausted'});
+      const fresh=db.prepare('SELECT credits FROM users WHERE id=?').get(req.user.id);return res.json({result:imageResult,image_url:imageResult,credits_remaining:fresh.credits});
+    }
+    const text=await openRouterChat([{role:'system',content:`You are SQ AI, a professional creative assistant. Generate useful, specific output for the requested tool. Tool: ${tool}. Return only the finished result, no meta commentary.`},{role:'user',content:`Request: ${prompt}\nLanguage: ${language||'English'}\nPlatform: ${platform||'General'}`}],process.env.OPENROUTER_MODEL);
+    if(!text.trim())return res.status(502).json({error:'ai_empty_result'});
     if(!consumeCredit(req.user.id,`tool:${tool}`))return res.status(402).json({error:'credits_exhausted'});
-    const fresh=db.prepare('SELECT credits FROM users WHERE id=?').get(req.user.id);res.json({result,credits_remaining:fresh.credits});
+    const fresh=db.prepare('SELECT credits FROM users WHERE id=?').get(req.user.id);res.json({result:text,credits_remaining:fresh.credits});
   }catch(e){next(e);}
 });
 
-app.post('/api/campaigns/generate',auth,async(req,res,next)=>{try{if(req.user.credits<1)return res.status(402).json({error:'credits_exhausted'});const prompt=limitText(req.body.prompt||req.body.input,6000);if(!prompt)return res.status(400).json({error:'prompt_required'});const text=await openRouterChat([{role:'system',content:'You are SQ AI. Build a practical advertising campaign with audience, offer, creatives, copy, budget split, KPIs and testing plan.'},{role:'user',content:prompt}],process.env.OPENROUTER_MODEL);if(!consumeCredit(req.user.id,'campaign:generate'))return res.status(402).json({error:'credits_exhausted'});res.json({result:text});}catch(e){next(e);}});
+app.post('/api/campaigns/generate',auth,async(req,res,next)=>{try{if(req.user.credits<1)return res.status(402).json({error:'credits_exhausted'});const product=limitText(req.body.product,1000),audience=limitText(req.body.audience,1000),goal=limitText(req.body.goal,100),platform=limitText(req.body.platform,100),input=limitText(req.body.input||req.body.prompt,4000);if(!product)return res.status(400).json({error:'product_required'});const prompt=`Product/service: ${product}\nTarget audience: ${audience||'Not specified'}\nGoal: ${goal||'Sales'}\nPlatform: ${platform||'Multi-platform'}\nAdditional information: ${input||'None'}\n\nCreate a practical campaign including audience, offer, strategy, hooks, ad copy, creative directions, video script, CTA, budget split, KPIs and testing plan.`;const text=await openRouterChat([{role:'system',content:'You are SQ AI. Build a practical advertising campaign. Use clear headings and actionable recommendations.'},{role:'user',content:prompt}],process.env.OPENROUTER_MODEL);if(!text.trim())return res.status(502).json({error:'ai_empty_result'});if(!consumeCredit(req.user.id,'campaign:generate'))return res.status(402).json({error:'credits_exhausted'});res.json({result:text});}catch(e){next(e);}});
 app.post('/api/billing/checkout',auth,(req,res)=>res.status(501).json({error:'payment_provider_not_configured',message:'Paddle checkout is not wired into the server yet.'}));
 
 app.use((err,req,res,next)=>{console.error('api_error',err);res.status(err.status||500).json({error:err.code||'server_error',message:process.env.NODE_ENV==='production'?'Request failed.':err.message});});
