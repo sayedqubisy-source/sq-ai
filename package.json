@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --import ./runtime-fix.mjs --import ./video-fix.mjs --import ./ui-fix.mjs server.js",
-    "dev": "node --watch --import ./runtime-fix.mjs --import ./video-fix.mjs --import ./ui-fix.mjs server.js"
+    "start": "node --import ./ai-fix.mjs --import ./runtime-fix.mjs --import ./video-fix.mjs --import ./ui-fix.mjs server.js",
+    "dev": "node --watch --import ./ai-fix.mjs --import ./runtime-fix.mjs --import ./video-fix.mjs --import ./ui-fix.mjs server.js"
   },
   "dependencies": {
     "express": "^5.1.0",
