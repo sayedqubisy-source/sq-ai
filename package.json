@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --import ./billing-fix.mjs --import ./ui-fix.mjs --import ./video-fix.mjs server.js",
-    "dev": "node --watch --import ./billing-fix.mjs --import ./ui-fix.mjs --import ./video-fix.mjs server.js"
+    "start": "node --import ./billing-fix.mjs --import ./ui-fix.mjs --import ./video-fix.mjs --import ./video-jobs-fix.mjs server.js",
+    "dev": "node --watch --import ./billing-fix.mjs --import ./ui-fix.mjs --import ./video-fix.mjs --import ./video-jobs-fix.mjs server.js"
   },
   "dependencies": {
     "express": "^5.1.0",
