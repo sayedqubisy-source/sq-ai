@@ -2,6 +2,14 @@
   'use strict';
 
   const VIDEO_RE = /(?:\/generated-videos\/|\.(?:mp4|webm|mov)(?:[?#].*)?$)/i;
+  const IMAGE_RE = /^(?:data:image\/(?:png|jpe?g|webp|gif);base64,|https?:\/\/.*\.(?:png|jpe?g|webp|gif)(?:[?#].*)?$|\/generated-images\/)/i;
+
+  function normalizeUrl(value) {
+    if (!value) return '';
+    if (/^https?:\/\//i.test(value) || /^data:/i.test(value)) return value;
+    if (value.startsWith('/')) return value;
+    return `/${value}`;
+  }
 
   function isVideoUrl(value) {
     if (!value || typeof value !== 'string') return false;
@@ -9,11 +17,32 @@
     return (/^https?:\/\//i.test(v) && VIDEO_RE.test(v)) || /^\/generated-videos\//i.test(v);
   }
 
-  function normalizeUrl(value) {
-    if (!value) return '';
-    if (/^https?:\/\//i.test(value)) return value;
-    if (value.startsWith('/')) return value;
-    return `/${value}`;
+  function isImageUrl(value) {
+    if (!value || typeof value !== 'string') return false;
+    return IMAGE_RE.test(value.trim());
+  }
+
+  function actionRow(src, filename, label) {
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.gap = '8px';
+    row.style.flexWrap = 'wrap';
+
+    const open = document.createElement('a');
+    open.className = 'btn';
+    open.href = src;
+    open.target = '_blank';
+    open.rel = 'noopener';
+    open.textContent = `Open ${label}`;
+
+    const download = document.createElement('a');
+    download.className = 'btn';
+    download.href = src;
+    download.download = filename;
+    download.textContent = `Download ${label}`;
+
+    row.append(open, download);
+    return row;
   }
 
   function renderVideoResult(box, url) {
@@ -37,38 +66,69 @@
     video.style.borderRadius = '12px';
     video.style.background = '#000';
 
-    const row = document.createElement('div');
-    row.style.display = 'flex';
-    row.style.gap = '8px';
-    row.style.flexWrap = 'wrap';
-
-    const open = document.createElement('a');
-    open.className = 'btn';
-    open.href = src;
-    open.target = '_blank';
-    open.rel = 'noopener';
-    open.textContent = 'Open video';
-
-    const download = document.createElement('a');
-    download.className = 'btn';
-    download.href = src;
-    download.download = 'sq-ai-video.mp4';
-    download.textContent = 'Download video';
-
-    row.append(open, download);
-    wrap.append(video, row);
+    wrap.append(video, actionRow(src, 'sq-ai-video.mp4', 'video'));
     box.append(wrap);
     return true;
   }
 
-  function scanVideoBoxes(root = document) {
+  function renderImageResult(box, url) {
+    if (!box || !isImageUrl(url)) return false;
+    const src = normalizeUrl(url.trim());
+    box.dataset.imageUrl = src;
+    box.style.whiteSpace = 'normal';
+    box.innerHTML = '';
+
+    const wrap = document.createElement('div');
+    wrap.style.display = 'grid';
+    wrap.style.gap = '10px';
+
+    const image = document.createElement('img');
+    image.src = src;
+    image.alt = 'SQ AI generated image';
+    image.loading = 'lazy';
+    image.style.width = '100%';
+    image.style.maxHeight = '620px';
+    image.style.objectFit = 'contain';
+    image.style.borderRadius = '12px';
+    image.style.background = '#000';
+
+    wrap.append(image, actionRow(src, 'sq-ai-image.png', 'image'));
+    box.append(wrap);
+    return true;
+  }
+
+  function scanResultBoxes(root = document) {
     root.querySelectorAll('.result-box').forEach(box => {
-      if (box.dataset.videoRendered === '1') return;
-      const url = box.dataset.videoUrl || box.textContent.trim();
-      if (isVideoUrl(url) && renderVideoResult(box, url)) {
-        box.dataset.videoRendered = '1';
+      if (box.dataset.mediaRendered === '1') return;
+      const value = box.dataset.videoUrl || box.dataset.imageUrl || box.textContent.trim();
+      if (renderVideoResult(box, value) || renderImageResult(box, value)) {
+        box.dataset.mediaRendered = '1';
       }
     });
+  }
+
+  function patchOutputExtractor() {
+    if (typeof window.extractOutput !== 'function' || window.__sqAiOutputPatched) return;
+    const original = window.extractOutput;
+    window.extractOutput = function(data) {
+      const candidates = [
+        data?.video_url,
+        data?.image_url,
+        data?.result?.video_url,
+        data?.result?.image_url,
+        data?.result,
+        data?.output?.video_url,
+        data?.output?.image_url,
+        data?.output,
+        data?.text,
+        data?.content,
+        data?.message
+      ];
+      const media = candidates.find(value => typeof value === 'string' && (isVideoUrl(value) || isImageUrl(value)));
+      if (media) return media;
+      return original(data);
+    };
+    window.__sqAiOutputPatched = true;
   }
 
   function patchResultReader() {
@@ -77,6 +137,7 @@
     window.getCurrentToolResult = function(category) {
       const box = document.getElementById(`${category}Result`);
       if (box?.dataset?.videoUrl) return box.dataset.videoUrl;
+      if (box?.dataset?.imageUrl) return box.dataset.imageUrl;
       return original(category);
     };
     window.__sqAiResultReaderPatched = true;
@@ -89,7 +150,7 @@
       const name = document.getElementById('settingsName')?.value.trim() || '';
       const button = document.querySelector('#settings-account .btn-primary');
       if (!name) {
-        if (typeof showToast === 'function') showToast('Enter your name first.');
+        window.showToast?.('Enter your name first.');
         return;
       }
       button?.classList.add('loading');
@@ -100,25 +161,51 @@
         });
         if (data?.user) {
           state.user = data.user;
-          if (typeof updateUserUI === 'function') updateUserUI();
+          window.updateUserUI?.();
         }
-        if (typeof showToast === 'function') showToast('Account saved.');
+        window.showToast?.('Account saved.');
       } catch (err) {
-        if (typeof showToast === 'function') showToast(err?.message || 'Could not save account.');
+        window.showToast?.(err?.message || 'Could not save account.');
       } finally {
         button?.classList.remove('loading');
       }
     };
   }
 
+  function patchPasswordMinimum() {
+    const input = document.getElementById('authPassword');
+    if (input) {
+      input.minLength = 8;
+      input.setAttribute('minlength', '8');
+      input.placeholder = 'At least 8 characters';
+    }
+  }
+
+  function patchBillingAliases() {
+    if (typeof window.startCheckout !== 'function' || window.__sqAiBillingPatched) return;
+    const original = window.startCheckout;
+    window.startCheckout = function(plan) {
+      const aliases = { pro: 'growth', business: 'scale' };
+      return original(aliases[plan] || plan);
+    };
+    window.__sqAiBillingPatched = true;
+  }
+
   function init() {
+    patchOutputExtractor();
     patchResultReader();
     patchAccountSave();
-    scanVideoBoxes();
+    patchPasswordMinimum();
+    patchBillingAliases();
+    scanResultBoxes();
+
     const observer = new MutationObserver(() => {
+      patchOutputExtractor();
       patchResultReader();
       patchAccountSave();
-      scanVideoBoxes();
+      patchPasswordMinimum();
+      patchBillingAliases();
+      scanResultBoxes();
     });
     observer.observe(document.body, { subtree: true, childList: true, characterData: true });
   }
