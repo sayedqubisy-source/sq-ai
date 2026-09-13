@@ -49,6 +49,36 @@ function fileUrls(base, file) {
   ];
 }
 
+function authHeaders() {
+  const token = String(process.env.HF_TOKEN || '').trim();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function retryableStatus(status) {
+  return status === 408 || status === 425 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+async function requestWithRetry(url, options = {}, controller, maxAttempts = 3) {
+  let lastResponse = null;
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await previousFetch(url, { ...options, signal: controller.signal });
+      lastResponse = response;
+      if (response.ok || !retryableStatus(response.status) || attempt === maxAttempts) return response;
+      const retryAfter = Number(response.headers.get('retry-after') || 0);
+      const waitMs = retryAfter > 0 ? Math.min(retryAfter * 1000, 30000) : 1500 * attempt;
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+    } catch (error) {
+      lastError = error;
+      if (error?.name === 'AbortError' || attempt === maxAttempts) throw error;
+      await new Promise(resolve => setTimeout(resolve, 1500 * attempt));
+    }
+  }
+  if (lastResponse) return lastResponse;
+  throw lastError || new Error('Hugging Face request failed.');
+}
+
 async function freeVideo(payload) {
   const space = process.env.FREE_VIDEO_SPACE || 'alexcheng0072/wan27-free-video-generator';
   const base = `https://${space.replace(/\/$/, '')}.hf.space`;
@@ -56,29 +86,38 @@ async function freeVideo(payload) {
   const prompt = String(payload.prompt || '').trim().slice(0, 600);
   const duration = Math.min(5, Math.max(2, Number(process.env.FREE_VIDEO_DURATION_SECONDS || 3)));
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 240000);
+  const timer = setTimeout(() => controller.abort(), 300000);
+  const headers = { 'Content-Type': 'application/json', Accept: 'application/json', ...authHeaders() };
+
   try {
-    // Current public Space signature:
-    // input_image, prompt, height, width, negative_prompt, duration,
-    // guidance_scale, steps, seed, randomize_seed, progress
+    // Current Space API: input_image, prompt, height, width, negative_prompt,
+    // duration_seconds, guidance_scale, steps, seed, randomize_seed.
     const negativePrompt = 'nsfw, nudity, explicit content, watermark, text, signature, subtitles, low quality, blurry, deformed, disfigured, static frame';
-    const submit = await previousFetch(`${base}/gradio_api/call/generate_video`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({
-        data: [null, prompt, height, width, negativePrompt, duration, 0, 4, 42, true]
-      }),
-      signal: controller.signal
+    const body = JSON.stringify({
+      data: [null, prompt, height, width, negativePrompt, duration, 0, 4, 42, true]
     });
+
+    const submit = await requestWithRetry(`${base}/gradio_api/call/generate_video`, {
+      method: 'POST',
+      headers,
+      body
+    }, controller, 3);
+
     const raw = await submit.text();
-    let data = {}; try { data = JSON.parse(raw); } catch {}
-    if (!submit.ok) throw new Error(data?.error || `Free video service rejected the request (${submit.status}).`);
+    let data = {};
+    try { data = JSON.parse(raw); } catch {}
+    if (!submit.ok) {
+      throw Object.assign(new Error(data?.error || `Free video service rejected the request (${submit.status}).`), { upstreamStatus: submit.status });
+    }
     if (!data.event_id) throw new Error('Free video service did not return an event id.');
 
-    const result = await previousFetch(`${base}/gradio_api/call/generate_video/${encodeURIComponent(data.event_id)}`, {
-      headers: { Accept: 'text/event-stream' }, signal: controller.signal
-    });
-    if (!result.ok) throw new Error(`Free video service status failed (${result.status}).`);
+    // The result endpoint is an SSE stream. A temporary 502/503 here is also
+    // retried because ZeroGPU can cold-start between queue submission and polling.
+    const result = await requestWithRetry(`${base}/gradio_api/call/generate_video/${encodeURIComponent(data.event_id)}`, {
+      headers: { Accept: 'text/event-stream', ...authHeaders() }
+    }, controller, 3);
+    if (!result.ok) throw Object.assign(new Error(`Free video service status failed (${result.status}).`), { upstreamStatus: result.status });
+
     const stream = await result.text();
     let finalData = null;
     let streamError = '';
@@ -100,11 +139,12 @@ async function freeVideo(payload) {
     let video = null;
     let lastStatus = 0;
     for (const fileUrl of fileUrls(base, file)) {
-      video = await previousFetch(fileUrl, { signal: controller.signal });
+      video = await requestWithRetry(fileUrl, { headers: authHeaders() }, controller, 3);
       lastStatus = video.status;
       if (video.ok) break;
     }
-    if (!video?.ok) throw new Error(`Generated video download failed (${lastStatus}).`);
+    if (!video?.ok) throw Object.assign(new Error(`Generated video download failed (${lastStatus}).`), { upstreamStatus: lastStatus });
+
     const bytes = Buffer.from(await video.arrayBuffer());
     if (!bytes.length) throw new Error('Generated video download returned an empty file.');
     const contentType = (video.headers.get('content-type') || '').toLowerCase();
@@ -116,16 +156,23 @@ async function freeVideo(payload) {
     fs.writeFileSync(path.join(generatedVideoDir(), filename), bytes);
     return new Response(JSON.stringify({ provider: 'huggingface-zero-gpu', model: 'FastVideo/FastWan2.2-TI2V-5B-FullAttn-Diffusers', video_url: `/generated-videos/${filename}`, status: 'completed', free: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (error) {
-    const status = error?.name === 'AbortError' ? 504 : 503;
-    return new Response(JSON.stringify({ error: { code: status === 504 ? 'free_video_timeout' : 'free_video_unavailable', message: error?.message || 'Free video service is temporarily unavailable.' } }), { status, headers: { 'Content-Type': 'application/json' } });
-  } finally { clearTimeout(timer); }
+    if (error?.name === 'AbortError') {
+      return new Response(JSON.stringify({ error: { code: 'free_video_timeout', message: 'Video generation timed out. The free GPU queue may be busy; please try again.' } }), { status: 504, headers: { 'Content-Type': 'application/json' } });
+    }
+    const upstreamStatus = Number(error?.upstreamStatus || 0);
+    const status = retryableStatus(upstreamStatus) ? 502 : 503;
+    return new Response(JSON.stringify({ error: { code: status === 502 ? 'free_video_bad_gateway' : 'free_video_unavailable', message: error?.message || 'Free video service is temporarily unavailable.' } }), { status, headers: { 'Content-Type': 'application/json' } });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 globalThis.fetch = async function videoSafeFetch(input, init = {}) {
   const url = typeof input === 'string' ? input : input?.url || '';
   const method = String(init.method || 'GET').toUpperCase();
   if (url.endsWith('/api/v1/videos') && method === 'POST' && typeof init.body === 'string') {
-    let payload; try { payload = JSON.parse(init.body); } catch { return previousFetch(input, init); }
+    let payload;
+    try { payload = JSON.parse(init.body); } catch { return previousFetch(input, init); }
     if (process.env.PAID_VIDEO_ENABLED !== 'true') return freeVideo(payload);
   }
   return previousFetch(input, init);
