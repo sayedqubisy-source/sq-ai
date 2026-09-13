@@ -6,7 +6,7 @@
   function isVideoUrl(value) {
     if (!value || typeof value !== 'string') return false;
     const v = value.trim();
-    return /^https?:\/\//i.test(v) && VIDEO_RE.test(v) || /^\/generated-videos\//i.test(v);
+    return (/^https?:\/\//i.test(v) && VIDEO_RE.test(v)) || /^\/generated-videos\//i.test(v);
   }
 
   function normalizeUrl(value) {
@@ -65,8 +65,8 @@
     root.querySelectorAll('.result-box').forEach(box => {
       if (box.dataset.videoRendered === '1') return;
       const url = box.dataset.videoUrl || box.textContent.trim();
-      if (isVideoUrl(url)) {
-        if (renderVideoResult(box, url)) box.dataset.videoRendered = '1';
+      if (isVideoUrl(url) && renderVideoResult(box, url)) {
+        box.dataset.videoRendered = '1';
       }
     });
   }
@@ -83,28 +83,28 @@
   }
 
   function patchAccountSave() {
-    if (window.__sqAiAccountPatched || typeof window.API === 'undefined') return;
+    if (window.__sqAiAccountPatched || typeof API === 'undefined') return;
     window.__sqAiAccountPatched = true;
     window.saveAccount = async function() {
       const name = document.getElementById('settingsName')?.value.trim() || '';
       const button = document.querySelector('#settings-account .btn-primary');
       if (!name) {
-        window.showToast?.('Enter your name first.');
+        if (typeof showToast === 'function') showToast('Enter your name first.');
         return;
       }
       button?.classList.add('loading');
       try {
-        const data = await window.API.request('/api/account', {
+        const data = await API.request('/api/account', {
           method: 'PATCH',
           body: JSON.stringify({ name })
         });
         if (data?.user) {
-          window.state.user = data.user;
-          window.updateUserUI?.();
+          state.user = data.user;
+          if (typeof updateUserUI === 'function') updateUserUI();
         }
-        window.showToast?.('Account saved.');
+        if (typeof showToast === 'function') showToast('Account saved.');
       } catch (err) {
-        window.showToast?.(err?.message || 'Could not save account.');
+        if (typeof showToast === 'function') showToast(err?.message || 'Could not save account.');
       } finally {
         button?.classList.remove('loading');
       }
