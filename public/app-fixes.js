@@ -191,15 +191,12 @@
     window.__sqAiBillingPatched = true;
   }
 
-  function init() {
-    patchOutputExtractor();
-    patchResultReader();
-    patchAccountSave();
-    patchPasswordMinimum();
-    patchBillingAliases();
-    scanResultBoxes();
-
-    const observer = new MutationObserver(() => {
+  let scanQueued = false;
+  function scheduleScan() {
+    if (scanQueued) return;
+    scanQueued = true;
+    requestAnimationFrame(() => {
+      scanQueued = false;
       patchOutputExtractor();
       patchResultReader();
       patchAccountSave();
@@ -207,7 +204,13 @@
       patchBillingAliases();
       scanResultBoxes();
     });
-    observer.observe(document.body, { subtree: true, childList: true, characterData: true });
+  }
+
+  function init() {
+    scheduleScan();
+
+    const observer = new MutationObserver(scheduleScan);
+    observer.observe(document.body, { subtree: true, childList: true });
   }
 
   if (document.readyState === 'loading') {
