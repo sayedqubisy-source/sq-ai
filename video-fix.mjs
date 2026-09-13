@@ -39,13 +39,15 @@ async function freeVideo(payload) {
   const space = process.env.FREE_VIDEO_SPACE || 'alexcheng0072/wan27-free-video-generator';
   const base = `https://${space.replace(/\/$/, '')}.hf.space`;
   const { width, height } = platformDimensions(payload.platform);
+  const aspect = `${width}x${height}`;
   const prompt = String(payload.prompt || '').slice(0, 600);
   const duration = Math.min(5, Math.max(2, Number(process.env.FREE_VIDEO_DURATION_SECONDS || 3)));
-  const negativePrompt = 'nsfw, nudity, explicit content, watermark, text, signature, subtitles, low quality, blurry, deformed, disfigured, static frame';
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 240000);
   try {
-    const inputData = [null, prompt, height, width, negativePrompt, duration, 0, 4, 42, true];
+    // Current public Space API has exactly four inputs:
+    // input_image, prompt, aspect_ratio, duration_seconds.
+    const inputData = [null, prompt, aspect, duration];
     const submit = await previousFetch(`${base}/gradio_api/call/generate_video`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ data: inputData }), signal: controller.signal
