@@ -26,51 +26,17 @@ const db = new Database(dbPath);
 db.pragma('journal_mode=WAL');
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS users(
-    id INTEGER PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    name TEXT,
-    password_hash TEXT,
-    plan TEXT NOT NULL DEFAULT 'starter',
-    credits INTEGER NOT NULL DEFAULT 100,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE IF NOT EXISTS api_keys(
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    key TEXT UNIQUE NOT NULL,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE IF NOT EXISTS usage(
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    endpoint TEXT NOT NULL,
-    units INTEGER NOT NULL,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE IF NOT EXISTS sessions(
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    token_hash TEXT UNIQUE NOT NULL,
-    expires_at TEXT NOT NULL,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE IF NOT EXISTS projects(
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER NOT NULL,
-    title TEXT NOT NULL,
-    content TEXT,
-    type TEXT NOT NULL DEFAULT 'Project',
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
-  );
+CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT,email TEXT UNIQUE NOT NULL,name TEXT DEFAULT '',password_hash TEXT,plan TEXT NOT NULL DEFAULT 'starter',credits INTEGER NOT NULL DEFAULT 100,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS api_keys (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,key TEXT UNIQUE NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS usage (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,endpoint TEXT NOT NULL,units INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,token_hash TEXT UNIQUE NOT NULL,expires_at TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL,title TEXT NOT NULL,content TEXT NOT NULL,type TEXT NOT NULL DEFAULT 'Project',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 `);
-
-function columnExists(table, column) {
-  return db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === column);
-}
-if (!columnExists('users', 'name')) db.exec('ALTER TABLE users ADD COLUMN name TEXT');
-if (!columnExists('users', 'password_hash')) db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT');
-if (!columnExists('usage', 'endpoint')) db.exec('ALTER TABLE usage ADD COLUMN endpoint TEXT');
+for (const statement of [
+  "ALTER TABLE users ADD COLUMN name TEXT DEFAULT ''",
+  "ALTER TABLE users ADD COLUMN password_hash TEXT",
+  "ALTER TABLE usage ADD COLUMN endpoint TEXT DEFAULT 'unknown'"
+]) { try { db.exec(statement); } catch {} }
 
 const plans = {
   starter: { name: 'Starter', credits: 100, price_usd: 19 },
@@ -97,9 +63,7 @@ function parseCookies(req) {
   const cookies = {};
   for (const part of (req.headers.cookie || '').split(';')) {
     const i = part.indexOf('=');
-    if (i !== -1) {
-      try { cookies[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); } catch {}
-    }
+    if (i !== -1) { try { cookies[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim()); } catch {} }
   }
   return cookies;
 }
@@ -129,21 +93,79 @@ function auth(req, res, next) {
 const limitText = (value, max=4000) => String(value ?? '').trim().slice(0, max);
 const validEmail = email => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function fetchJsonWithTimeout(url, options={}, timeoutMs=90000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (e) {
+    if (e?.name === 'AbortError') throw Object.assign(new Error('ai_provider_timeout'), { code:'ai_provider_timeout', status:504 });
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+function modelList(primary) {
+  const defaults = ['openrouter/free'];
+  return [...new Set([primary, ...defaults].filter(Boolean))];
+}
+function shouldRetry(status) { return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500; }
+
 async function openRouterChat(messages, model) {
   const key = process.env.OPENROUTER_API_KEY;
-  if (!key) throw Object.assign(new Error('openrouter_not_configured'), { code: 'openrouter_not_configured' });
-  const r = await fetch('https://openrouter.ai/api/v1/chat/completions', { method:'POST', headers:{ Authorization:`Bearer ${key}`, 'Content-Type':'application/json', 'HTTP-Referer':process.env.APP_URL || 'http://localhost:3000', 'X-Title':'SQ AI' }, body:JSON.stringify({ model, messages }) });
-  const data = await r.json().catch(()=>({}));
-  if (!r.ok) throw Object.assign(new Error(data?.error?.message || 'openrouter_request_failed'), { code:'openrouter_request_failed', status:r.status });
-  return data?.choices?.[0]?.message?.content || '';
+  if (!key) throw Object.assign(new Error('openrouter_not_configured'), { code: 'openrouter_not_configured', status: 502 });
+  let lastError;
+  for (const candidate of modelList(model || process.env.OPENROUTER_MODEL)) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const r = await fetchJsonWithTimeout('https://openrouter.ai/api/v1/chat/completions', {
+          method:'POST',
+          headers:{ Authorization:`Bearer ${key}`, 'Content-Type':'application/json', 'HTTP-Referer':process.env.APP_URL || 'http://localhost:3000', 'X-Title':'SQ AI' },
+          body:JSON.stringify({ model:candidate, messages })
+        }, 90000);
+        const data = await r.json().catch(()=>({}));
+        if (r.ok) {
+          const text = data?.choices?.[0]?.message?.content;
+          if (typeof text === 'string' && text.trim()) return text;
+          lastError = Object.assign(new Error('ai_empty_result'), { code:'ai_empty_result', status:502 });
+          break;
+        }
+        lastError = Object.assign(new Error(data?.error?.message || 'openrouter_request_failed'), { code:'openrouter_request_failed', status:r.status });
+        if (!shouldRetry(r.status)) throw lastError;
+        if (attempt === 0) await sleep(700);
+      } catch (e) {
+        lastError = e;
+        if (e?.code === 'openrouter_request_failed' && !shouldRetry(e.status)) throw e;
+        if (attempt === 0) await sleep(700);
+      }
+    }
+  }
+  throw lastError || Object.assign(new Error('openrouter_request_failed'), { code:'openrouter_request_failed', status:502 });
 }
+
 async function openRouterImage(prompt, model) {
   const key = process.env.OPENROUTER_API_KEY;
-  if (!key) throw Object.assign(new Error('openrouter_not_configured'), { code: 'openrouter_not_configured' });
-  const r = await fetch('https://openrouter.ai/api/v1/images', { method:'POST', headers:{ Authorization:`Bearer ${key}`, 'Content-Type':'application/json', 'HTTP-Referer':process.env.APP_URL || 'http://localhost:3000', 'X-Title':'SQ AI' }, body:JSON.stringify({ model, prompt, n:1, size:'1024x1024' }) });
-  const data = await r.json().catch(()=>({}));
-  if (!r.ok) throw Object.assign(new Error(data?.error?.message || 'openrouter_image_request_failed'), { code:'openrouter_image_request_failed', status:r.status });
-  return data;
+  if (!key) throw Object.assign(new Error('openrouter_not_configured'), { code: 'openrouter_not_configured', status: 502 });
+  const selectedModel = model || process.env.OPENROUTER_IMAGE_MODEL || 'google/gemini-3.1-flash-image-preview';
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await fetchJsonWithTimeout('https://openrouter.ai/api/v1/images', {
+        method:'POST',
+        headers:{ Authorization:`Bearer ${key}`, 'Content-Type':'application/json', 'HTTP-Referer':process.env.APP_URL || 'http://localhost:3000', 'X-Title':'SQ AI' },
+        body:JSON.stringify({ model:selectedModel, prompt, n:1, size:'1024x1024' })
+      }, 120000);
+      const data = await r.json().catch(()=>({}));
+      if (r.ok) return data;
+      lastError = Object.assign(new Error(data?.error?.message || 'openrouter_image_request_failed'), { code:'openrouter_image_request_failed', status:r.status });
+      if (!shouldRetry(r.status)) throw lastError;
+      if (attempt === 0) await sleep(1000);
+    } catch (e) {
+      lastError = e;
+      if (e?.code === 'openrouter_image_request_failed' && !shouldRetry(e.status)) throw e;
+      if (attempt === 0) await sleep(1000);
+    }
+  }
+  throw lastError || Object.assign(new Error('openrouter_image_request_failed'), { code:'openrouter_image_request_failed', status:502 });
 }
 
 async function saveVideoBlob(blob) {
@@ -158,7 +180,7 @@ async function saveVideoBlob(blob) {
 }
 async function generateWithHuggingFace({ prompt }) {
   const token = process.env.HF_TOKEN;
-  if (!token) throw Object.assign(new Error('huggingface_not_configured'), { code:'huggingface_not_configured' });
+  if (!token) throw Object.assign(new Error('huggingface_not_configured'), { code:'huggingface_not_configured', status:502 });
   const model = process.env.HF_VIDEO_MODEL || 'Wan-AI/Wan2.2-TI2V-5B';
   const provider = process.env.HF_VIDEO_PROVIDER || 'fal-ai';
   const client = new InferenceClient(token);
@@ -179,7 +201,7 @@ async function secureVideoGenerate({ tool, prompt, language, platform }) {
   if (process.env.HF_TOKEN) return generateWithHuggingFace({ prompt: normalizedPrompt });
   const url = process.env.VIDEO_API_URL;
   const key = process.env.VIDEO_API_KEY;
-  if (!url || !key) throw Object.assign(new Error('video_provider_not_configured'), { code:'video_provider_not_configured' });
+  if (!url || !key) throw Object.assign(new Error('video_provider_not_configured'), { code:'video_provider_not_configured', status:502 });
   let endpoint; try { endpoint = new URL(url); } catch { throw Object.assign(new Error('video_provider_url_invalid'), { code:'video_provider_url_invalid' }); }
   if (!['https:','http:'].includes(endpoint.protocol)) throw Object.assign(new Error('video_provider_url_invalid'), { code:'video_provider_url_invalid' });
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 300000);
@@ -215,7 +237,7 @@ const TOOL_ALIASES = {
 const imageTools = new Set(['text-image','product-image','ad-creative','background','enhance','thumbnail','social-image','variations']);
 const videoTools = new Set(['text-video','image-video','ad-video','product-video','reels','long-shorts','script-video','voiceover','subtitles','translation','resize','silence','noise','hooks-video']);
 
-app.get('/api/health', (req,res)=>res.json({ ok:true, service:'SQ AI', version:'3.5.0', video_mode:process.env.PAID_VIDEO_ENABLED === 'true' ? 'paid' : 'free' }));
+app.get('/api/health', (req,res)=>res.json({ ok:true, service:'SQ AI', version:'3.6.0', video_mode:process.env.PAID_VIDEO_ENABLED === 'true' ? 'paid' : 'free' }));
 app.get('/api/plans', (req,res)=>res.json(plans));
 app.post('/api/auth/signup', async (req,res)=>{
   try {
@@ -253,7 +275,7 @@ app.post('/api/tools/generate',auth,async(req,res,next)=>{
     }
     if(imageTools.has(tool)){
       const data=await openRouterImage(`${prompt}\nPlatform: ${platform||'general'}\nLanguage/context: ${language||'English'}`,process.env.OPENROUTER_IMAGE_MODEL);const first=data?.data?.[0];
-      if(!first?.b64_json&&!first?.url)throw Object.assign(new Error('image_data_missing'),{code:'image_data_missing'});
+      if(!first?.b64_json&&!first?.url)throw Object.assign(new Error('image_data_missing'),{code:'image_data_missing',status:502});
       const imageResult=first.b64_json?`data:${first.media_type||'image/png'};base64,${first.b64_json}`:first.url;
       if(!consumeCredit(req.user.id,`tool:${tool}`))return res.status(402).json({error:'credits_exhausted'});
       const fresh=db.prepare('SELECT credits FROM users WHERE id=?').get(req.user.id);return res.json({result:imageResult,image_url:imageResult,credits_remaining:fresh.credits});
@@ -265,7 +287,7 @@ app.post('/api/tools/generate',auth,async(req,res,next)=>{
   }catch(e){next(e);}
 });
 
-app.post('/api/campaigns/generate',auth,async(req,res,next)=>{try{if(req.user.credits<1)return res.status(402).json({error:'credits_exhausted'});const product=limitText(req.body.product,1000),audience=limitText(req.body.audience,1000),goal=limitText(req.body.goal,100),platform=limitText(req.body.platform,100),input=limitText(req.body.input||req.body.prompt,4000);if(!product)return res.status(400).json({error:'product_required'});const prompt=`Product/service: ${product}\nTarget audience: ${audience||'Not specified'}\nGoal: ${goal||'Sales'}\nPlatform: ${platform||'Multi-platform'}\nAdditional information: ${input||'None'}\n\nCreate a practical campaign including audience, offer, strategy, hooks, ad copy, creative directions, video script, CTA, budget split, KPIs and testing plan.`;const text=await openRouterChat([{role:'system',content:'You are SQ AI. Build a practical advertising campaign. Use clear headings and actionable recommendations.'},{role:'user',content:prompt}],process.env.OPENROUTER_MODEL);if(!text.trim())return res.status(502).json({error:'ai_empty_result'});if(!consumeCredit(req.user.id,'campaign:generate'))return res.status(402).json({error:'credits_exhausted'});res.json({result:text});}catch(e){next(e);}});
+app.post('/api/campaigns/generate',auth,async(req,res,next)=>{try{if(req.user.credits<1)return res.status(402).json({error:'credits_exhausted'});const product=limitText(req.body.product,1000),audience=limitText(req.body.audience,1000),goal=limitText(req.body.goal,100),platform=limitText(req.body.platform,100),input=limitText(req.body.input||req.body.prompt,4000);if(!product)return res.status(400).json({error:'product_required'});const prompt=`Product/service: ${product}\nTarget audience: ${audience||'Not specified'}\nGoal: ${goal||'Sales'}\nPlatform: ${platform||'Multi-platform'}\nAdditional information: ${input||'None'}\n\nCreate a practical campaign including audience, offer, strategy, hooks, ad copy, creative directions, video script, CTA, budget split, KPIs and testing plan.`;const text=await openRouterChat([{role:'system',content:'You are SQ AI. Build a practical advertising campaign. Use clear headings and actionable recommendations.'},{role:'user',content:prompt}],process.env.OPENROUTER_MODEL);if(!text.trim())return res.status(502).json({error:'ai_empty_result'});if(!consumeCredit(req.user.id,'campaign:generate'))return res.status(402).json({error:'credits_exhausted'});const fresh=db.prepare('SELECT credits FROM users WHERE id=?').get(req.user.id);res.json({result:text,credits_remaining:fresh.credits});}catch(e){next(e);}});
 app.post('/api/billing/checkout',auth,(req,res)=>res.status(501).json({error:'payment_provider_not_configured',message:'Paddle checkout is not wired into the server yet.'}));
 
 app.use((err,req,res,next)=>{console.error('api_error',err);res.status(err.status||500).json({error:err.code||'server_error',message:process.env.NODE_ENV==='production'?'Request failed.':err.message});});
