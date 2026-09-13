@@ -1,13 +1,14 @@
 const originalFetch = globalThis.fetch;
 
-// Current OpenRouter free text models. Keep the router first, then use
-// concrete free models whose slugs are currently published by OpenRouter.
+// OpenRouter's current free text models. The router is first; the explicit
+// models below are valid free variants used as deterministic fallbacks.
 const TEXT_FALLBACKS = [
   'openrouter/free',
   'nvidia/nemotron-3-ultra-550b-a55b:free',
-  'nvidia/nemotron-3.5-lightning:free',
-  'nvidia/nemotron-3-super:free',
-  'google/gemma-4-26b-a4b:free'
+  'nvidia/nemotron-3-super-120b-a12b:free',
+  'google/gemma-4-31b-it:free',
+  'google/gemma-4-26b-a4b:free',
+  'inclusionai/ling-3.0-flash-vl:free'
 ];
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -16,7 +17,7 @@ const retryable = status => status === 408 || status === 409 || status === 429 |
 
 function responseWithBody(response, body, status = response.status) {
   const headers = new Headers(response.headers);
-  if (!headers.has('content-type')) headers.set('content-type', 'application/json');
+  headers.set('content-type', 'application/json');
   return new Response(body, { status, statusText: response.statusText, headers });
 }
 
@@ -25,20 +26,13 @@ function extractText(body) {
   const content = message?.content;
   if (typeof content === 'string' && content.trim()) return content.trim();
   if (Array.isArray(content)) {
-    const text = content
-      .map(part => typeof part === 'string' ? part : part?.text)
-      .filter(text => typeof text === 'string' && text.trim())
-      .join('\n')
-      .trim();
+    const text = content.map(part => typeof part === 'string' ? part : part?.text)
+      .filter(text => typeof text === 'string' && text.trim()).join('\n').trim();
     if (text) return text;
   }
   const choiceText = body?.choices?.[0]?.text;
   if (typeof choiceText === 'string' && choiceText.trim()) return choiceText.trim();
   return '';
-}
-
-function hasUsableText(body) {
-  return Boolean(extractText(body));
 }
 
 async function safeFetch(input, init = {}) {
@@ -68,7 +62,8 @@ async function safeFetch(input, init = {}) {
             ...payload,
             model,
             stream: false,
-            temperature: payload.temperature ?? 0.7
+            temperature: payload.temperature ?? 0.7,
+            max_tokens: payload.max_tokens ?? 1200
           })
         });
         const raw = await response.text();
@@ -77,20 +72,16 @@ async function safeFetch(input, init = {}) {
 
         let parsed = null;
         try { parsed = JSON.parse(raw); } catch {}
+        const text = extractText(parsed);
 
-        if (response.ok && hasUsableText(parsed)) {
-          // Normalize array/object content to a normal string so server.js
-          // and the browser always receive a usable result.
-          const normalized = extractText(parsed);
-          if (normalized) {
-            parsed.choices[0].message.content = normalized;
-            return responseWithBody(response, JSON.stringify(parsed), 200);
-          }
+        if (response.ok && text) {
+          if (parsed?.choices?.[0]?.message) parsed.choices[0].message.content = text;
+          return responseWithBody(response, JSON.stringify(parsed), 200);
         }
 
         lastErrorMessage = parsed?.error?.message || parsed?.message || `OpenRouter returned HTTP ${response.status}`;
         if (!response.ok && !retryable(response.status)) {
-          return responseWithBody(response, raw);
+          return responseWithBody(response, raw, response.status);
         }
       } catch (error) {
         lastErrorMessage = error?.message || String(error);
@@ -102,11 +93,11 @@ async function safeFetch(input, init = {}) {
       lastResponse || new Response('{}'),
       JSON.stringify({
         error: {
-          code: 'openrouter_empty_response',
-          message: `OpenRouter could not produce text after trying the configured free models. ${lastErrorMessage || 'No usable response was returned.'}`
+          code: 'openrouter_unavailable',
+          message: `OpenRouter did not return usable text. ${lastErrorMessage || 'No usable response was returned.'}`
         }
       }),
-      lastStatus >= 400 ? 502 : 502
+      503
     );
   }
 
@@ -115,12 +106,7 @@ async function safeFetch(input, init = {}) {
       const payload = JSON.parse(init.body);
       const model = String(payload.model || '');
       if (model.endsWith(':free')) {
-        return new Response(JSON.stringify({
-          error: {
-            code: 'video_model_requires_configuration',
-            message: 'The configured video model is a free/retired slug. Set OPENROUTER_VIDEO_MODEL to a currently supported video model before generating videos.'
-          }
-        }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ error: { code: 'video_model_requires_configuration', message: 'The configured video model requires a supported video provider.' } }), { status: 503, headers: { 'Content-Type': 'application/json' } });
       }
     } catch {}
   }
