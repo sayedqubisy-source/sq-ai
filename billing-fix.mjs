@@ -38,6 +38,12 @@ for (const statement of [
   "ALTER TABLE users ADD COLUMN billing_status TEXT DEFAULT 'inactive'"
 ]) { try { billingDb.exec(statement); } catch {} }
 
+const normalizePlan = value => {
+  const plan = String(value || '').trim().toLowerCase();
+  if (plan === 'pro') return 'growth';
+  if (plan === 'business') return 'scale';
+  return plan;
+};
 const planForPrice = priceId => {
   if (!priceId) return null;
   const map = {
@@ -73,7 +79,7 @@ function verifyPaddleSignature(rawBody, signature, secret) {
 
 async function createCheckout(req, res) {
   const apiKey = process.env.PADDLE_API_KEY;
-  const requestedPlan = String(req.body?.plan || '').trim().toLowerCase();
+  const requestedPlan = normalizePlan(req.body?.plan);
   const priceId = requestedPlan === 'starter' ? process.env.PADDLE_PRICE_STARTER
     : requestedPlan === 'growth' ? process.env.PADDLE_PRICE_GROWTH
     : requestedPlan === 'scale' ? process.env.PADDLE_PRICE_SCALE : null;
@@ -123,7 +129,7 @@ async function paddleWebhook(req, res) {
       const custom = data.custom_data || {};
       const userId = Number(custom.sq_ai_user_id || 0);
       const priceId = data?.items?.[0]?.price?.id || data?.items?.[0]?.price_id || '';
-      const plan = custom.sq_ai_plan || planForPrice(priceId);
+      const plan = normalizePlan(custom.sq_ai_plan) || planForPrice(priceId);
       if (userId && plan && creditsForPlan[plan]) {
         billingDb.prepare(`UPDATE users SET plan=?, credits=?, paddle_subscription_id=COALESCE(?,paddle_subscription_id), billing_status='active' WHERE id=?`).run(plan, creditsForPlan[plan], data.subscription_id || null, userId);
       }
