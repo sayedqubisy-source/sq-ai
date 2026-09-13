@@ -108,6 +108,14 @@ async function createCheckout(req, res) {
   return res.json({ ok: true, transaction_id: data?.data?.id || null, checkout_url: data?.data?.checkout?.url || null, plan: requestedPlan });
 }
 
+function findUserIdForSubscription(data) {
+  const direct = Number(data?.custom_data?.sq_ai_user_id || 0);
+  if (direct) return direct;
+  const subscriptionId = String(data?.id || data?.subscription_id || '');
+  if (!subscriptionId) return 0;
+  return Number(billingDb.prepare('SELECT id FROM users WHERE paddle_subscription_id=?').get(subscriptionId)?.id || 0);
+}
+
 async function paddleWebhook(req, res) {
   const secret = process.env.PADDLE_WEBHOOK_SECRET;
   const signature = req.get('paddle-signature') || '';
@@ -123,21 +131,23 @@ async function paddleWebhook(req, res) {
   if (billingDb.prepare('SELECT id FROM billing_events WHERE event_id=?').get(eventId)) return res.status(200).send('ok');
 
   try {
-    billingDb.prepare('INSERT INTO billing_events(event_id,event_type,transaction_id) VALUES(?,?,?)').run(eventId, eventType, event?.data?.id || null);
-    if (eventType === 'transaction.completed') {
+    const processEvent = billingDb.transaction(() => {
       const data = event.data || {};
-      const custom = data.custom_data || {};
-      const userId = Number(custom.sq_ai_user_id || 0);
-      const priceId = data?.items?.[0]?.price?.id || data?.items?.[0]?.price_id || '';
-      const plan = normalizePlan(custom.sq_ai_plan) || planForPrice(priceId);
-      if (userId && plan && creditsForPlan[plan]) {
+      if (eventType === 'transaction.completed') {
+        const custom = data.custom_data || {};
+        const userId = Number(custom.sq_ai_user_id || 0);
+        const priceId = data?.items?.[0]?.price?.id || data?.items?.[0]?.price_id || '';
+        const plan = normalizePlan(custom.sq_ai_plan) || planForPrice(priceId);
+        if (!userId || !plan || !creditsForPlan[plan]) throw new Error('invalid_paddle_transaction_mapping');
         billingDb.prepare(`UPDATE users SET plan=?, credits=?, paddle_subscription_id=COALESCE(?,paddle_subscription_id), billing_status='active' WHERE id=?`).run(plan, creditsForPlan[plan], data.subscription_id || null, userId);
       }
-    }
-    if (eventType === 'subscription.canceled' || eventType === 'subscription.past_due') {
-      const userId = Number(event?.data?.custom_data?.sq_ai_user_id || 0);
-      if (userId) billingDb.prepare('UPDATE users SET billing_status=? WHERE id=?').run(eventType === 'subscription.canceled' ? 'canceled' : 'past_due', userId);
-    }
+      if (eventType === 'subscription.canceled' || eventType === 'subscription.past_due') {
+        const userId = findUserIdForSubscription(data);
+        if (userId) billingDb.prepare('UPDATE users SET billing_status=? WHERE id=?').run(eventType === 'subscription.canceled' ? 'canceled' : 'past_due', userId);
+      }
+      billingDb.prepare('INSERT INTO billing_events(event_id,event_type,transaction_id) VALUES(?,?,?)').run(eventId, eventType, data?.id || null);
+    });
+    processEvent();
     return res.status(200).send('ok');
   } catch (error) {
     console.error('paddle_webhook_processing_failed', error?.message || error);
