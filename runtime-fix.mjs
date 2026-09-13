@@ -1,14 +1,12 @@
 const originalFetch = globalThis.fetch;
 
-// OpenRouter's current free text models. The router is first; the explicit
-// models below are valid free variants used as deterministic fallbacks.
+// Keep the router first. OpenRouter currently exposes 25+ free models and
+// recommends openrouter/free as the simplest free entry point.
 const TEXT_FALLBACKS = [
   'openrouter/free',
   'nvidia/nemotron-3-ultra-550b-a55b:free',
   'nvidia/nemotron-3-super-120b-a12b:free',
-  'google/gemma-4-31b-it:free',
-  'google/gemma-4-26b-a4b:free',
-  'inclusionai/ling-3.0-flash-vl:free'
+  'inclusionai/ling-3.0-flash-fin:free'
 ];
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -16,22 +14,29 @@ const isOpenRouter = url => String(url).startsWith('https://openrouter.ai/api/v1
 const retryable = status => status === 408 || status === 409 || status === 429 || status >= 500;
 
 function responseWithBody(response, body, status = response.status) {
-  const headers = new Headers(response.headers);
+  const headers = new Headers(response?.headers || {});
   headers.set('content-type', 'application/json');
-  return new Response(body, { status, statusText: response.statusText, headers });
+  return new Response(body, { status, statusText: response?.statusText || '' , headers });
 }
 
 function extractText(body) {
-  const message = body?.choices?.[0]?.message;
+  const choice = body?.choices?.[0];
+  const message = choice?.message;
   const content = message?.content;
   if (typeof content === 'string' && content.trim()) return content.trim();
   if (Array.isArray(content)) {
-    const text = content.map(part => typeof part === 'string' ? part : part?.text)
-      .filter(text => typeof text === 'string' && text.trim()).join('\n').trim();
+    const text = content.map(part => {
+      if (typeof part === 'string') return part;
+      return part?.text || part?.content || part?.value || '';
+    }).filter(Boolean).join('\n').trim();
     if (text) return text;
   }
-  const choiceText = body?.choices?.[0]?.text;
-  if (typeof choiceText === 'string' && choiceText.trim()) return choiceText.trim();
+  if (typeof choice?.text === 'string' && choice.text.trim()) return choice.text.trim();
+  if (typeof body?.output_text === 'string' && body.output_text.trim()) return body.output_text.trim();
+  if (Array.isArray(body?.output)) {
+    const text = body.output.flatMap(item => item?.content || []).map(part => part?.text || '').filter(Boolean).join('\n').trim();
+    if (text) return text;
+  }
   return '';
 }
 
@@ -50,26 +55,30 @@ async function safeFetch(input, init = {}) {
     const preferred = payload.model || process.env.OPENROUTER_MODEL || 'openrouter/free';
     const models = [...new Set([preferred, ...TEXT_FALLBACKS].filter(Boolean))];
     let lastResponse = null;
-    let lastStatus = 502;
     let lastErrorMessage = '';
 
     for (let attempt = 0; attempt < models.length; attempt++) {
       const model = models[attempt];
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 45000);
       try {
         const response = await originalFetch(input, {
           ...init,
+          signal: controller.signal,
           body: JSON.stringify({
             ...payload,
             model,
             stream: false,
             temperature: payload.temperature ?? 0.7,
-            max_tokens: payload.max_tokens ?? 1200
+            max_tokens: payload.max_tokens ?? 1200,
+            provider: {
+              ...(payload.provider || {}),
+              allow_fallbacks: true
+            }
           })
         });
         const raw = await response.text();
         lastResponse = response;
-        lastStatus = response.status;
-
         let parsed = null;
         try { parsed = JSON.parse(raw); } catch {}
         const text = extractText(parsed);
@@ -79,12 +88,14 @@ async function safeFetch(input, init = {}) {
           return responseWithBody(response, JSON.stringify(parsed), 200);
         }
 
-        lastErrorMessage = parsed?.error?.message || parsed?.message || `OpenRouter returned HTTP ${response.status}`;
+        lastErrorMessage = parsed?.error?.message || parsed?.message || (response.ok ? 'OpenRouter returned an empty completion.' : `OpenRouter returned HTTP ${response.status}`);
         if (!response.ok && !retryable(response.status)) {
           return responseWithBody(response, raw, response.status);
         }
       } catch (error) {
-        lastErrorMessage = error?.message || String(error);
+        lastErrorMessage = error?.name === 'AbortError' ? 'OpenRouter request timed out.' : (error?.message || String(error));
+      } finally {
+        clearTimeout(timer);
       }
       if (attempt < models.length - 1) await sleep(Math.min(1200, 250 * (attempt + 1)));
     }
