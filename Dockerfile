@@ -10,4 +10,4 @@ ENV PAID_VIDEO_ENABLED=false
 ENV VIDEO_API_URL=http://127.0.0.1:3000/api/v1/videos
 ENV VIDEO_API_KEY=free-local-video
 EXPOSE 3000
-CMD ["node", "--import", "./runtime-fix.mjs", "--import", "./video-fix.mjs", "--import", "./api-fix.mjs", "server.js"]
+CMD ["node", "--import", "./runtime-fix.mjs", "--import", "./video-fix.mjs", "server.js"]
