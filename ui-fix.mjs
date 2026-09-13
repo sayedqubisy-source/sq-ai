@@ -10,7 +10,6 @@ process.env.PAID_VIDEO_ENABLED = process.env.PAID_VIDEO_ENABLED || 'false';
 
 const file = path.resolve('public/index.html');
 const marker = '<script src="/app-fixes.js"></script>';
-
 try {
   if (fs.existsSync(file)) {
     const html = fs.readFileSync(file, 'utf8');
