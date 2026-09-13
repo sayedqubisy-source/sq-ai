@@ -143,6 +143,56 @@
     window.__sqAiResultReaderPatched = true;
   }
 
+  function patchVideoJobsFetch() {
+    if (window.__sqAiVideoJobsFetchPatched) return;
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async function(input, init = {}) {
+      const url = typeof input === 'string' ? input : input?.url || '';
+      const method = String(init?.method || (typeof input !== 'string' ? input?.method : 'GET') || 'GET').toUpperCase();
+      if (!/\/api\/tools\/generate(?:\?|$)/.test(url) || method !== 'POST') {
+        return originalFetch(input, init);
+      }
+
+      const response = await originalFetch(input, init);
+      if (response.status !== 202) return response;
+      let payload;
+      try { payload = await response.clone().json(); } catch { return response; }
+      if (!payload?.async || !payload?.job_id) return response;
+
+      const jobId = payload.job_id;
+      const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+      const started = Date.now();
+      const maxWait = 8 * 60 * 1000;
+      let last = payload;
+      while (Date.now() - started < maxWait) {
+        await wait(2500);
+        const jobResponse = await originalFetch(`/api/tools/video-job/${encodeURIComponent(jobId)}`, { credentials:'same-origin' });
+        let job;
+        try { job = await jobResponse.json(); } catch { job = null; }
+        if (!jobResponse.ok) {
+          last = job || last;
+          if (jobResponse.status === 404) break;
+          continue;
+        }
+        last = job || last;
+        if (job?.status === 'completed' && job?.video_url) {
+          return new Response(JSON.stringify({
+            result:job.video_url,
+            video_url:job.video_url,
+            provider:job.provider || 'huggingface-zero-gpu',
+            free:true,
+            credits_remaining:job.credits_remaining
+          }), { status:200, headers:{'Content-Type':'application/json'} });
+        }
+        if (job?.status === 'failed') {
+          return new Response(JSON.stringify({ error:job.error || 'video_generation_failed' }), { status:502, headers:{'Content-Type':'application/json'} });
+        }
+      }
+      return new Response(JSON.stringify({ error:'video_generation_timeout', job_id:jobId, status:last?.status || 'running' }), { status:504, headers:{'Content-Type':'application/json'} });
+    };
+    window.__sqAiVideoJobsFetchPatched = true;
+  }
+
   function patchAccountSave() {
     if (window.__sqAiAccountPatched || typeof API === 'undefined') return;
     window.__sqAiAccountPatched = true;
@@ -199,6 +249,7 @@
       scanQueued = false;
       patchOutputExtractor();
       patchResultReader();
+      patchVideoJobsFetch();
       patchAccountSave();
       patchPasswordMinimum();
       patchBillingAliases();
