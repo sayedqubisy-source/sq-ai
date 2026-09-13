@@ -7,6 +7,7 @@ const previousFetch = globalThis.fetch;
 function platformDimensions(platform) {
   const p = String(platform || '').toLowerCase();
   if (/youtube|facebook|linkedin|website|landscape/.test(p)) return { width: 832, height: 480 };
+  if (/square|instagram-square/.test(p)) return { width: 640, height: 640 };
   return { width: 480, height: 832 };
 }
 
@@ -21,7 +22,7 @@ function findFile(value) {
   if (!value) return null;
   if (typeof value === 'string') {
     if (/^https?:\/\//i.test(value)) return value;
-    if (/\.\.(mp4|webm|mov)(\?|$)/i.test(value) || /\.mp4$/i.test(value) || /gradio_api\/file=/i.test(value)) return value;
+    if (/\.\.(mp4|webm|mov)(\?|$)/i.test(value) || /\.(mp4|webm|mov)(\?|$)/i.test(value) || /gradio_api\/file=/i.test(value)) return value;
     return null;
   }
   if (Array.isArray(value)) {
@@ -42,8 +43,6 @@ function findFile(value) {
 function fileUrls(base, file) {
   if (/^https?:\/\//i.test(file)) return [file];
   if (/^\/gradio_api\/file=/i.test(file)) return [`${base}${file}`];
-  // Gradio's file route expects the server-side path after '='. Keep the
-  // original path first; some deployments reject an encoded slash path.
   return [
     `${base}/gradio_api/file=${file}`,
     `${base}/gradio_api/file=${encodeURIComponent(file)}`
@@ -54,16 +53,21 @@ async function freeVideo(payload) {
   const space = process.env.FREE_VIDEO_SPACE || 'alexcheng0072/wan27-free-video-generator';
   const base = `https://${space.replace(/\/$/, '')}.hf.space`;
   const { width, height } = platformDimensions(payload.platform);
-  const aspect = `${width}x${height}`;
-  const prompt = String(payload.prompt || '').slice(0, 600);
+  const prompt = String(payload.prompt || '').trim().slice(0, 600);
   const duration = Math.min(5, Math.max(2, Number(process.env.FREE_VIDEO_DURATION_SECONDS || 3)));
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 240000);
   try {
+    // Current public Space signature:
+    // input_image, prompt, height, width, negative_prompt, duration,
+    // guidance_scale, steps, seed, randomize_seed, progress
+    const negativePrompt = 'nsfw, nudity, explicit content, watermark, text, signature, subtitles, low quality, blurry, deformed, disfigured, static frame';
     const submit = await previousFetch(`${base}/gradio_api/call/generate_video`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ data: [null, prompt, aspect, duration] }),
+      body: JSON.stringify({
+        data: [null, prompt, height, width, negativePrompt, duration, 0, 4, 42, true]
+      }),
       signal: controller.signal
     });
     const raw = await submit.text();
@@ -104,8 +108,8 @@ async function freeVideo(payload) {
     const bytes = Buffer.from(await video.arrayBuffer());
     if (!bytes.length) throw new Error('Generated video download returned an empty file.');
     const contentType = (video.headers.get('content-type') || '').toLowerCase();
-    const looksHtml = bytes.slice(0, 128).toString('utf8').toLowerCase().includes('<!doctype html') || bytes.slice(0, 128).toString('utf8').toLowerCase().includes('<html');
-    if (looksHtml) throw new Error('Generated video download returned an HTML error page.');
+    const head = bytes.slice(0, 256).toString('utf8').toLowerCase();
+    if (head.includes('<!doctype html') || head.includes('<html')) throw new Error('Generated video download returned an HTML error page.');
     if (contentType.includes('json') || contentType.includes('text/html')) throw new Error('Generated video download returned an invalid response.');
 
     const filename = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}.mp4`;
