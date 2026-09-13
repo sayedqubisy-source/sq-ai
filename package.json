@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node --import ./video-fix.mjs server.js",
-    "dev": "node --watch --import ./video-fix.mjs server.js"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
   "dependencies": {
     "express": "^5.1.0",
