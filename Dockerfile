@@ -5,4 +5,4 @@ RUN npm install --omit=dev
 COPY . .
 ENV NODE_ENV=production PORT=3000
 EXPOSE 3000
-CMD ["node", "--import", "./runtime-fix.mjs", "server.js"]
+CMD ["node", "--import", "./runtime-fix.mjs", "--import", "./video-fix.mjs", "server.js"]
