@@ -1,12 +1,12 @@
 const originalFetch = globalThis.fetch;
 
-// Keep text generation working even when one OpenRouter free provider is
-// temporarily unavailable. The server itself already supplies the prompt;
-// this layer only makes the upstream request resilient.
+// Current OpenRouter free text models. Keep the router first, then use
+// concrete free models whose slugs are currently published by OpenRouter.
 const TEXT_FALLBACKS = [
   'openrouter/free',
-  'nvidia/nemotron-3-ultra:free',
-  'inclusionai/ling-3.0-flash-vl:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'nvidia/nemotron-3.5-lightning:free',
+  'nvidia/nemotron-3-super:free',
   'google/gemma-4-26b-a4b:free'
 ];
 
@@ -20,11 +20,25 @@ function responseWithBody(response, body, status = response.status) {
   return new Response(body, { status, statusText: response.statusText, headers });
 }
 
+function extractText(body) {
+  const message = body?.choices?.[0]?.message;
+  const content = message?.content;
+  if (typeof content === 'string' && content.trim()) return content.trim();
+  if (Array.isArray(content)) {
+    const text = content
+      .map(part => typeof part === 'string' ? part : part?.text)
+      .filter(text => typeof text === 'string' && text.trim())
+      .join('\n')
+      .trim();
+    if (text) return text;
+  }
+  const choiceText = body?.choices?.[0]?.text;
+  if (typeof choiceText === 'string' && choiceText.trim()) return choiceText.trim();
+  return '';
+}
+
 function hasUsableText(body) {
-  const content = body?.choices?.[0]?.message?.content;
-  if (typeof content === 'string') return content.trim().length > 0;
-  if (Array.isArray(content)) return content.some(part => typeof part?.text === 'string' && part.text.trim().length > 0);
-  return false;
+  return Boolean(extractText(body));
 }
 
 async function safeFetch(input, init = {}) {
@@ -42,41 +56,57 @@ async function safeFetch(input, init = {}) {
     const preferred = payload.model || process.env.OPENROUTER_MODEL || 'openrouter/free';
     const models = [...new Set([preferred, ...TEXT_FALLBACKS].filter(Boolean))];
     let lastResponse = null;
-    let lastError = null;
+    let lastStatus = 502;
+    let lastErrorMessage = '';
 
     for (let attempt = 0; attempt < models.length; attempt++) {
       const model = models[attempt];
       try {
         const response = await originalFetch(input, {
           ...init,
-          body: JSON.stringify({ ...payload, model, stream: false })
+          body: JSON.stringify({
+            ...payload,
+            model,
+            stream: false,
+            temperature: payload.temperature ?? 0.7
+          })
         });
         const raw = await response.text();
-        lastResponse = responseWithBody(response, raw);
+        lastResponse = response;
+        lastStatus = response.status;
 
-        if (response.ok) {
-          let parsed = null;
-          try { parsed = JSON.parse(raw); } catch {}
-          if (parsed && hasUsableText(parsed)) return responseWithBody(response, raw);
-        } else if (!retryable(response.status)) {
+        let parsed = null;
+        try { parsed = JSON.parse(raw); } catch {}
+
+        if (response.ok && hasUsableText(parsed)) {
+          // Normalize array/object content to a normal string so server.js
+          // and the browser always receive a usable result.
+          const normalized = extractText(parsed);
+          if (normalized) {
+            parsed.choices[0].message.content = normalized;
+            return responseWithBody(response, JSON.stringify(parsed), 200);
+          }
+        }
+
+        lastErrorMessage = parsed?.error?.message || parsed?.message || `OpenRouter returned HTTP ${response.status}`;
+        if (!response.ok && !retryable(response.status)) {
           return responseWithBody(response, raw);
         }
       } catch (error) {
-        lastError = error;
+        lastErrorMessage = error?.message || String(error);
       }
-      if (attempt < models.length - 1) await sleep(Math.min(1500, 300 * (attempt + 1)));
+      if (attempt < models.length - 1) await sleep(Math.min(1200, 250 * (attempt + 1)));
     }
 
-    // Never pass a successful-but-empty response to server.js.
     return responseWithBody(
       lastResponse || new Response('{}'),
       JSON.stringify({
         error: {
           code: 'openrouter_empty_response',
-          message: 'All configured OpenRouter text models returned no usable text. Check the OpenRouter key, credits, model availability, and provider status.'
+          message: `OpenRouter could not produce text after trying the configured free models. ${lastErrorMessage || 'No usable response was returned.'}`
         }
       }),
-      502
+      lastStatus >= 400 ? 502 : 502
     );
   }
 
