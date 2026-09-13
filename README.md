@@ -46,3 +46,6 @@ Paddle checkout is intentionally not enabled in the server yet. `/api/billing/ch
 
 ## Important
 Provider credentials must be supplied through environment variables. Never commit real API keys to GitHub.
+
+## Deployment
+Abasthan auto-deploys the `main` branch. This line intentionally refreshes the service after a platform/runtime restart.
