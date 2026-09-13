@@ -14,22 +14,16 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const isOpenRouter = url => String(url).startsWith('https://openrouter.ai/api/v1/');
 const retryable = status => status === 408 || status === 409 || status === 429 || status >= 500;
 
-function responseWithBody(response, body) {
+function responseWithBody(response, body, status = response.status) {
   const headers = new Headers(response.headers);
   if (!headers.has('content-type')) headers.set('content-type', 'application/json');
-  return new Response(body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers
-  });
+  return new Response(body, { status, statusText: response.statusText, headers });
 }
 
 function hasUsableText(body) {
   const content = body?.choices?.[0]?.message?.content;
   if (typeof content === 'string') return content.trim().length > 0;
-  if (Array.isArray(content)) {
-    return content.some(part => typeof part?.text === 'string' && part.text.trim().length > 0);
-  }
+  if (Array.isArray(content)) return content.some(part => typeof part?.text === 'string' && part.text.trim().length > 0);
   return false;
 }
 
@@ -55,41 +49,37 @@ async function safeFetch(input, init = {}) {
       try {
         const response = await originalFetch(input, {
           ...init,
-          body: JSON.stringify({
-            ...payload,
-            model,
-            stream: false
-          })
+          body: JSON.stringify({ ...payload, model, stream: false })
         });
-
         const raw = await response.text();
         lastResponse = responseWithBody(response, raw);
 
         if (response.ok) {
           let parsed = null;
           try { parsed = JSON.parse(raw); } catch {}
-
-          // A 200 with no usable message is treated as a failed provider,
-          // otherwise server.js turns it into the misleading empty-result UI.
           if (parsed && hasUsableText(parsed)) return responseWithBody(response, raw);
-          if (!parsed && raw.trim()) return responseWithBody(response, raw);
         } else if (!retryable(response.status)) {
           return responseWithBody(response, raw);
         }
       } catch (error) {
         lastError = error;
       }
-
-      if (attempt < models.length - 1) {
-        await sleep(Math.min(1500, 300 * (attempt + 1)));
-      }
+      if (attempt < models.length - 1) await sleep(Math.min(1500, 300 * (attempt + 1)));
     }
 
-    if (lastResponse) return lastResponse;
-    throw lastError || new Error('OpenRouter request failed.');
+    // Never pass a successful-but-empty response to server.js.
+    return responseWithBody(
+      lastResponse || new Response('{}'),
+      JSON.stringify({
+        error: {
+          code: 'openrouter_empty_response',
+          message: 'All configured OpenRouter text models returned no usable text. Check the OpenRouter key, credits, model availability, and provider status.'
+        }
+      }),
+      502
+    );
   }
 
-  // Do not silently replace an invalid/free video slug with a paid model.
   if (isVideoSubmit && typeof init.body === 'string') {
     try {
       const payload = JSON.parse(init.body);
