@@ -72,7 +72,9 @@ async function createCheckout(req,res){
 }
 function findUserIdForSubscription(data){const direct=Number(data?.custom_data?.sq_ai_user_id||0);if(direct)return direct;const subscriptionId=String(data?.id||data?.subscription_id||'');if(!subscriptionId)return 0;return Number(billingDb.prepare('SELECT id FROM users WHERE paddle_subscription_id=?').get(subscriptionId)?.id||0);}
 async function paddleWebhook(req,res){
-  const secret=process.env.PADDLE_WEBHOOK_SECRET,signature=req.get('paddle-signature')||'',raw=req.rawBody?.toString('utf8')||'';
+  const secret=process.env.PADDLE_WEBHOOK_SECRET,signature=req.get('paddle-signature')||'';
+  const rawBuffer=req.rawBody || (Buffer.isBuffer(req.body)?req.body:null);
+  const raw=rawBuffer?.toString('utf8')||'';
   if(!secret)return res.status(503).send('webhook_not_configured');
   if(!verifyPaddleSignature(raw,signature,secret))return res.status(400).send('invalid_signature');
   let event;try{event=JSON.parse(raw);}catch{return res.status(400).send('invalid_json');}
@@ -88,7 +90,7 @@ async function paddleWebhook(req,res){
         billingDb.prepare(`UPDATE users SET plan=?,credits=?,paddle_subscription_id=COALESCE(?,paddle_subscription_id),billing_status='active' WHERE id=?`).run(plan,creditsForPlan[plan],data.subscription_id||null,userId);
       }
       if(eventType==='subscription.activated'){const userId=findUserIdForSubscription(data);if(userId)billingDb.prepare("UPDATE users SET billing_status='active' WHERE id=?").run(userId);}
-      if(eventType==='subscription.canceled'||eventType==='subscription.past_due'){const userId=findUserIdForSubscription(data);if(userId)billingDb.prepare('UPDATE users SET billing_status=? WHERE id=?').run(eventType==='subscription.canceled'?'canceled':'past_due',userId);}
+      if(eventType==='subscription.canceled'||eventType==='subscription.past_due'){const userId=findUserIdForSubscription(data);if(userId)billingDb.prepare("UPDATE users SET billing_status=? WHERE id=?").run(eventType==='subscription.canceled'?'canceled':'past_due',userId);}
       if(eventType==='transaction.past_due'||eventType==='transaction.payment_failed'){const userId=Number(data?.custom_data?.sq_ai_user_id||0);if(userId)billingDb.prepare("UPDATE users SET billing_status='past_due' WHERE id=?").run(userId);}
       billingDb.prepare('INSERT INTO billing_events(event_id,event_type,transaction_id) VALUES(?,?,?)').run(eventId,eventType,data?.id||null);
     })();
@@ -96,4 +98,4 @@ async function paddleWebhook(req,res){
   }catch(error){console.error('paddle_webhook_processing_failed',error?.message||error);return res.status(500).send('webhook_processing_failed');}
 }
 appPrototype.post=function patchedPost(route,...handlers){if(route==='/api/billing/checkout'&&handlers.length)return originalPost.call(this,route,...handlers.slice(0,-1),createCheckout);return originalPost.call(this,route,...handlers);};
-appPrototype.listen=function patchedListen(...args){const app=this;if(!app.__sqaiPaddleWebhookRegistered){app.__sqaiPaddleWebhookRegistered=true;originalPost.call(app,'/api/webhooks/paddle',paddleWebhook);}return originalListen.apply(this,args);};
+appPrototype.listen=function patchedListen(...args){const app=this;if(!app.__sqaiPaddleWebhookRegistered){app.__sqaiPaddleWebhookRegistered=true;const raw=express.raw({type:'application/json',limit:'256kb'});originalPost.call(app,'/api/webhooks/paddle',raw,paddleWebhook);}return originalListen.apply(this,args);};
