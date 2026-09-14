@@ -91,9 +91,8 @@ async function freeVideo(payload){
     }
     if(!data.event_id)throw new Error('Free video service did not return an event id.');
 
-    const result=await requestWithRetry(`${base}/gradio_api/call/generate_video/${encodeURIComponent(data.event_id)},{}`.replace(/,\{\}$/,''),{
-      headers:{Accept:'text/event-stream',...authHeaders()}
-    },controller,5);
+    const resultUrl=`${base}/gradio_api/call/generate_video/${encodeURIComponent(data.event_id)}`;
+    const result=await requestWithRetry(resultUrl,{headers:{Accept:'text/event-stream',...authHeaders()}},controller,5);
     if(!result.ok){
       const detail=await result.text().catch(()=>`HTTP ${result.status}`);
       throw Object.assign(new Error(`Free video result request failed (${result.status}): ${detail.slice(0,300)}`),{upstreamStatus:result.status});
