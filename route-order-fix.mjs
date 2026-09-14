@@ -8,9 +8,9 @@ if (!currentListen.__sqAiRouteOrderFix) {
     const router = this?.router || this?._router;
     if (!router?.stack) return server;
 
-    // The bridge is loaded before server.js, but its routes are registered at listen-time.
-    // Move only those routes ahead of server.js's API 404 fallback.
-    const wanted = new Set(['/api/ai/providers','/api/ai/route','/api/tools/discovery','/tools']);
+    // Runtime hooks register some routes at listen-time. Move only those routes
+    // ahead of server.js's API 404 fallback without changing normal app order.
+    const wanted = new Set(['/api/ai/providers','/api/ai/route','/api/tools/discovery','/api/webhooks/paddle','/tools']);
     const selected = [];
     router.stack = router.stack.filter(layer => {
       const path = layer?.route?.path;
@@ -19,8 +19,7 @@ if (!currentListen.__sqAiRouteOrderFix) {
     });
     if (selected.length) router.stack.unshift(...selected);
 
-    // Global API rate guard. This is intentionally conservative and in-memory;
-    // it adds protection without introducing another paid dependency.
+    // Global API rate guard. Conservative in-memory protection, no paid dependency.
     const buckets = new Map();
     const WINDOW_MS = 60_000;
     const MAX_API_REQUESTS = 120;
