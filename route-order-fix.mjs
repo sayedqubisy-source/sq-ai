@@ -10,7 +10,15 @@ if (!currentListen.__sqAiRouteOrderFix) {
 
     // Runtime hooks register some routes at listen-time. Move only those routes
     // ahead of server.js's API 404 fallback without changing normal app order.
-    const wanted = new Set(['/api/ai/providers','/api/ai/route','/api/tools/discovery','/api/webhooks/paddle','/tools']);
+    const wanted = new Set([
+      '/api/ai/providers',
+      '/api/ai/route',
+      '/api/ai/status',
+      '/api/ai/capabilities',
+      '/api/tools/discovery',
+      '/api/webhooks/paddle',
+      '/tools'
+    ]);
     const selected = [];
     router.stack = router.stack.filter(layer => {
       const path = layer?.route?.path;
@@ -26,7 +34,8 @@ if (!currentListen.__sqAiRouteOrderFix) {
     const limiter = (req,res,next) => {
       if (!req.path?.startsWith('/api/')) return next();
       const now = Date.now();
-      const ip = String(req.ip || req.socket?.remoteAddress || 'unknown').slice(0,100);
+      const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+      const ip = String(forwarded || req.ip || req.socket?.remoteAddress || 'unknown').slice(0,100);
       let bucket = buckets.get(ip);
       if (!bucket || now - bucket.started >= WINDOW_MS) bucket = { started: now, count: 0 };
       bucket.count += 1;
