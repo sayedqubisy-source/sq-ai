@@ -35,16 +35,24 @@ process.on('uncaughtException', (error) => {
   setTimeout(() => process.exit(1), 250).unref();
 });
 
+function cleanupDir(dir, cutoff) {
+  if (!fs.existsSync(dir)) return;
+  for (const name of fs.readdirSync(dir)) {
+    const file = path.join(dir, name);
+    try {
+      const stat = fs.statSync(file);
+      if (stat.isFile() && stat.mtimeMs < cutoff) fs.unlinkSync(file);
+    } catch {}
+  }
+}
+
 setInterval(() => {
   try {
     const dbPath = process.env.DB_PATH || '/app/data/sq-ai.sqlite';
-    const dir = path.join(path.dirname(path.resolve(dbPath)), 'generated-videos');
-    if (!fs.existsSync(dir)) return;
+    const root = path.dirname(path.resolve(dbPath));
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    for (const name of fs.readdirSync(dir)) {
-      const file = path.join(dir, name);
-      try { const stat = fs.statSync(file); if (stat.isFile() && stat.mtimeMs < cutoff) fs.unlinkSync(file); } catch {}
-    }
+    cleanupDir(path.join(root, 'generated-videos'), cutoff);
+    cleanupDir(path.join(root, 'generated-media'), cutoff);
   } catch (error) { log('cleanup', error); }
 }, 6 * 60 * 60 * 1000).unref();
 
