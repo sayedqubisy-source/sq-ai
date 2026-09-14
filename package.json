@@ -5,8 +5,8 @@
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {
-    "start": "node --import ./security-fix.mjs --import ./sqai-bridge.mjs --import ./route-order-fix.mjs --import ./auto-recovery.mjs --import ./billing-fix.mjs --import ./ui-fix.mjs --import ./video-fix.mjs --import ./video-jobs-fix.mjs --import ./ai-runtime-loader.mjs --import ./ai-status.mjs --import ./media-studio-runtime.mjs server.js",
-    "dev": "node --watch --import ./security-fix.mjs --import ./sqai-bridge.mjs --import ./route-order-fix.mjs --import ./auto-recovery.mjs --import ./billing-fix.mjs --import ./ui-fix.mjs --import ./video-fix.mjs --import ./video-jobs-fix.mjs --import ./ai-runtime-loader.mjs --import ./ai-status.mjs --import ./media-studio-runtime.mjs server.js"
+    "start": "node --import ./security-fix.mjs --import ./sqai-bridge.mjs --import ./route-order-fix.mjs --import ./auto-recovery.mjs --import ./billing-fix.mjs --import ./ui-fix.mjs --import ./video-fix.mjs --import ./video-jobs-fix.mjs --import ./ai-runtime-loader.mjs --import ./ai-status.mjs --import ./media-studio-runtime.mjs --import ./media-assets-fix.mjs server.js",
+    "dev": "node --watch --import ./security-fix.mjs --import ./sqai-bridge.mjs --import ./route-order-fix.mjs --import ./auto-recovery.mjs --import ./billing-fix.mjs --import ./ui-fix.mjs --import ./video-fix.mjs --import ./video-jobs-fix.mjs --import ./ai-runtime-loader.mjs --import ./ai-status.mjs --import ./media-studio-runtime.mjs --import ./media-assets-fix.mjs server.js"
   },
   "dependencies": {
     "express": "^5.1.0",
