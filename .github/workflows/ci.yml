@@ -9,26 +9,35 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
       - name: Install dependencies
         run: npm install --omit=dev
-
-      - name: Syntax check server/runtime files
+      - name: Syntax check
         shell: bash
         run: |
           set -euo pipefail
-          for file in $(find . -maxdepth 2 -type f \( -name '*.js' -o -name '*.mjs' \) ! -path './node_modules/*'); do
-            node --check "$file"
-          done
-
+          while IFS= read -r -d '' file; do node --check "$file"; done < <(find . -maxdepth 2 -type f \( -name '*.js' -o -name '*.mjs' \) ! -path './node_modules/*' -print0)
       - name: Production smoke test
         run: node scripts/smoke.mjs
+      - name: Build production Docker image
+        run: docker build --pull -t sq-ai:ci .
+      - name: Run production Docker health check
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() { docker logs sq-ai-ci 2>/dev/null || true; docker rm -f sq-ai-ci 2>/dev/null || true; }
+          trap cleanup EXIT
+          docker run -d --name sq-ai-ci -p 3187:3000 -e NODE_ENV=production -e PORT=3000 -e DB_PATH=/app/data/sq-ai.sqlite -e MEDIA_PROMPT_ENHANCER=false sq-ai:ci
+          for i in {1..60}; do
+            if curl -fsS http://127.0.0.1:3187/api/health >/tmp/sq-ai-health.json; then cat /tmp/sq-ai-health.json; exit 0; fi
+            sleep 1
+          done
+          echo 'Production Docker container did not become healthy.'
+          exit 1
