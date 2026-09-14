@@ -8,22 +8,20 @@ process.env.FREE_VIDEO_SPACE = process.env.FREE_VIDEO_SPACE || 'alexcheng0072/wa
 process.env.FREE_VIDEO_DURATION_SECONDS = process.env.FREE_VIDEO_DURATION_SECONDS || '3';
 process.env.PAID_VIDEO_ENABLED = process.env.PAID_VIDEO_ENABLED || 'false';
 
-const file = path.resolve('public/index.html');
-const marker = '<script src="/app-fixes.js?v=sqai-20260914b"></script>';
-const themeMarker = '<script defer src="/ui-theme.js?v=sqai-light-20260914"></script>';
-const legalMarker = 'sqai-legal-links';
-const legalLinks = `\n    <div class="sqai-legal-links" style="margin-top:18px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;font-size:13px;opacity:.8">\n      <a href="/terms.html" rel="nofollow">Terms of Service</a>\n      <a href="/privacy.html" rel="nofollow">Privacy Notice</a>\n      <a href="/refund.html" rel="nofollow">Refund Policy</a>\n    </div>`;
-try {
-  if (fs.existsSync(file)) {
-    let html = fs.readFileSync(file, 'utf8');
-    const withoutOldMarkers = html
-      .replace(/\s*<script(?: defer)? src="\/app-fixes\.js(?:\?[^\"]*)?"><\/script>/g, '')
-      .replace(/\s*<script(?: defer)? src="\/ui-theme\.js(?:\?[^\"]*)?"><\/script>/g, '');
-    html = withoutOldMarkers.replace(/<\/head>/i, `  ${themeMarker}\n</head>`);
-    html = html.replace(/<\/body>/i, `  ${marker}\n</body>`);
-    if (!html.includes(legalMarker)) html = html.replace(/<\/footer>/i, `${legalLinks}\n  </footer>`);
-    if (html !== fs.readFileSync(file, 'utf8')) fs.writeFileSync(file, html, 'utf8');
+const file=path.resolve('public/index.html');
+const marker='<script src="/app-fixes.js?v=sqai-20260914b"></script>';
+const themeMarker='<script defer src="/ui-theme.js?v=sqai-light-20260914"></script>';
+const toolsMarker='sqai-tools-hub-link';
+const legalMarker='sqai-legal-links';
+const toolsLink=`<a id="${toolsMarker}" href="/tools.html" style="display:inline-flex;align-items:center;gap:7px;border:1px solid rgba(124,92,255,.28);background:rgba(124,92,255,.10);padding:8px 12px;border-radius:10px;color:#d8d1ff;font-size:12px;font-weight:700">✦ Tools Hub</a>`;
+const legalLinks=`\n    <div class="sqai-legal-links" style="margin-top:18px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;font-size:13px;opacity:.8">\n      <a href="/terms.html" rel="nofollow">Terms of Service</a>\n      <a href="/privacy.html" rel="nofollow">Privacy Notice</a>\n      <a href="/refund.html" rel="nofollow">Refund Policy</a>\n      ${toolsLink}\n    </div>`;
+try{
+  if(fs.existsSync(file)){
+    const original=fs.readFileSync(file,'utf8');
+    let html=original.replace(/\s*<script(?: defer)? src="\/app-fixes\.js(?:\?[^\"]*)?"><\/script>/g,'').replace(/\s*<script(?: defer)? src="\/ui-theme\.js(?:\?[^\"]*)?"><\/script>/g,'');
+    html=html.replace(/<\/head>/i,`  ${themeMarker}\n</head>`);
+    html=html.replace(/<\/body>/i,`  ${marker}\n</body>`);
+    if(!html.includes(legalMarker)) html=html.replace(/<\/footer>/i,`${legalLinks}\n  </footer>`);
+    if(html!==original)fs.writeFileSync(file,html,'utf8');
   }
-} catch (error) {
-  console.error('SQ AI UI fix injection failed:', error?.message || error);
-}
+}catch(error){console.error('SQ AI UI fix injection failed:',error?.message||error)}
