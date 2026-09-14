@@ -79,14 +79,19 @@ function finalizeCredit(job) {
 }
 async function enhancePrompt(prompt, kind, options) {
   if (process.env.MEDIA_PROMPT_ENHANCER === 'false') return prompt;
-  const result = await generateText({
-    capability: 'text',
-    messages: [
-      { role: 'system', content: 'You are SQ AI Prompt Director. Rewrite the user idea into a production-ready prompt for generative media. Preserve the user intent. For video include subject, action, setting, camera movement, lens/framing, lighting, physics, realism, continuity and audio cues. For music include genre, tempo, instrumentation, structure, mood and mix direction. Return only the final prompt.' },
-      { role: 'user', content: `MEDIA TYPE: ${kind}\nOPTIONS: ${JSON.stringify(options)}\nUSER IDEA: ${prompt}` }
-    ]
-  });
-  return result?.text?.trim() || prompt;
+  try {
+    const result = await generateText({
+      capability: 'text',
+      messages: [
+        { role: 'system', content: 'You are SQ AI Prompt Director. Rewrite the user idea into a production-ready prompt for generative media. Preserve the user intent. For video include subject, action, setting, camera movement, lens/framing, lighting, physics, realism, continuity and audio cues. For music include genre, tempo, instrumentation, structure, mood and mix direction. Return only the final prompt.' },
+        { role: 'user', content: `MEDIA TYPE: ${kind}\nOPTIONS: ${JSON.stringify(options)}\nUSER IDEA: ${prompt}` }
+      ]
+    });
+    return result?.text?.trim() || prompt;
+  } catch (error) {
+    console.warn('media_prompt_enhancement_skipped', error?.message || error);
+    return prompt;
+  }
 }
 async function googleFetch(url, options = {}, timeoutMs = 300000) {
   const controller = new AbortController();
