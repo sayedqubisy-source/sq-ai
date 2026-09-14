@@ -1,0 +1,17 @@
+node_modules/
+.env
+.env.*
+!.env.example
+
+/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+/generated-videos/
+/logs/
+*.log
+
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
