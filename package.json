@@ -7,8 +7,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "node --import ./sqai-bridge.mjs --import ./route-order-fix.mjs --import ./auto-recovery.mjs --import ./billing-fix.mjs --import ./ui-fix.mjs --import ./video-fix.mjs --import ./video-jobs-fix.mjs server.js",
-    "dev": "node --watch --import ./sqai-bridge.mjs --import ./route-order-fix.mjs --import ./auto-recovery.mjs --import ./billing-fix.mjs --import ./ui-fix.mjs --import ./video-fix.mjs --import ./video-jobs-fix.mjs server.js"
+    "start": "node --import ./sqai-bridge.mjs --import ./route-order-fix.mjs --import ./auto-recovery.mjs --import ./billing-fix.mjs --import ./ui-fix.mjs --import ./video-fix.mjs --import ./video-jobs-fix.mjs --import ./ai-status.mjs server.js",
+    "dev": "node --watch --import ./sqai-bridge.mjs --import ./route-order-fix.mjs --import ./auto-recovery.mjs --import ./billing-fix.mjs --import ./ui-fix.mjs --import ./video-fix.mjs --import ./video-jobs-fix.mjs --import ./ai-status.mjs server.js"
   },
   "dependencies": {
     "express": "^5.1.0",
