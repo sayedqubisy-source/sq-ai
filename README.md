@@ -2,16 +2,16 @@
 
 SQ AI is an AI creation workspace for content, ads, images, campaigns, and short video generation.
 
-## Current architecture
-- Express production server
+## Architecture
+- Express 5 production server
 - SQLite persistence with WAL
 - Cookie sessions and API-key authentication
 - Credits and usage metering
-- Text generation through OpenRouter
-- Image generation through OpenRouter
-- Free video generation through a public Hugging Face ZeroGPU Gradio Space
-- Optional paid video path, disabled by default
-- Docker production deployment
+- OpenRouter text and image generation
+- Free video generation through the public Hugging Face ZeroGPU Gradio Space
+- Persistent asynchronous video jobs with a single-worker queue
+- Optional Paddle billing integration, enabled when the required environment variables are configured
+- Docker production deployment on Abasthan
 - Terms, privacy, and refund pages
 
 ## Run locally
@@ -26,26 +26,32 @@ Open `http://localhost:3000`.
 - `POST /api/auth/login`
 - `POST /api/auth/logout`
 - `GET /api/me`
+- `POST /api/auth/set-password`
+- `PATCH /api/account`
 - `GET /api/usage`
 - `GET /api/projects`
 - `POST /api/projects`
 - `DELETE /api/projects/:id`
-- `PATCH /api/account`
 - `POST /api/tools/generate`
+- `GET /api/tools/video-job/:id`
 - `POST /api/campaigns/generate`
 - `GET /api/plans`
+- `POST /api/billing/checkout`
+- `POST /api/webhooks/paddle`
 - `GET /api/health`
 
 ## Free video mode
-The default Docker configuration routes video generation to the public Hugging Face ZeroGPU Space configured by `FREE_VIDEO_SPACE`. The current adapter uses the Space's `generate_video` Gradio endpoint with a text prompt, fixed aspect ratio, and 2–5 second duration.
+The default configuration uses `alexcheng0072/wan27-free-video-generator` through Hugging Face Gradio's queue API. The current Space accepts four inputs: optional first-frame image, prompt, fixed aspect ratio, and a 2–5 second duration. SQ AI serializes its own video jobs so multiple users do not hit the public ZeroGPU Space concurrently.
 
-The application stores generated files under `/app/data/generated-videos` when the free adapter returns a local file. The generated-video directory is served at `/generated-videos/`.
+Generated MP4 files are stored under the directory beside the SQLite database and served through `/generated-videos/`. The application removes generated files older than 24 hours.
+
+The free provider is external infrastructure, so its queue and daily ZeroGPU quota can still affect availability. SQ AI handles provider failures, timeouts, queueing, and credit refunds without charging a failed generation.
 
 ## Billing
-Paddle checkout is intentionally not enabled in the server yet. `/api/billing/checkout` returns `501` until the real Paddle checkout/webhook integration is configured.
+Paddle checkout is wired through `billing-fix.mjs`. It requires the Paddle API key, webhook secret, and the three configured Paddle price IDs. When those variables are absent, checkout fails safely with a configuration error instead of pretending that payment is enabled.
 
-## Important
-Provider credentials must be supplied through environment variables. Never commit real API keys to GitHub.
+## Environment
+Copy `.env.example` to your deployment environment and provide real provider credentials there. Never commit API keys, webhook secrets, or customer data to GitHub.
 
 ## Deployment
-Abasthan auto-deploys the `main` branch. This line intentionally refreshes the service after a platform/runtime restart.
+Abasthan can auto-deploy the `main` branch. The application listens on `process.env.PORT` and `0.0.0.0` for reverse-proxy deployment.
