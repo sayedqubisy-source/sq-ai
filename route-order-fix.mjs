@@ -34,7 +34,10 @@ if (!currentListen.__sqAiRouteOrderFix) {
     const limiter = (req,res,next) => {
       if (!req.path?.startsWith('/api/')) return next();
       const now = Date.now();
-      const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+      // Only trust forwarded addresses when the deployment explicitly enables it.
+      const forwarded = process.env.TRUST_PROXY === 'true'
+        ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+        : '';
       const ip = String(forwarded || req.ip || req.socket?.remoteAddress || 'unknown').slice(0,100);
       let bucket = buckets.get(ip);
       if (!bucket || now - bucket.started >= WINDOW_MS) bucket = { started: now, count: 0 };
