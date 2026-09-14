@@ -1,7 +1,7 @@
 // SQ AI Provider Registry — public metadata only; secrets stay in environment variables.
 export const AI_PROVIDERS = [
   {id:'openrouter',name:'OpenRouter',class:'llm_gateway',env:'OPENROUTER_API_KEY',capabilities:['text','vision','reasoning','tool_use'],priority:100,fallback:['gemini','groq','deepseek']},
-  {id:'gemini',name:'Google Gemini',class:'multimodal',env:'GEMINI_API_KEY',capabilities:['text','vision','audio','image','video'],priority:98,fallback:['openrouter','groq']},
+  {id:'gemini',name:'Google Gemini',class:'multimodal',env:'GEMINI_API_KEY',capabilities:['text','vision','audio','image','video','music'],priority:98,fallback:['openrouter','groq']},
   {id:'openai',name:'OpenAI',class:'frontier',env:'OPENAI_API_KEY',capabilities:['text','vision','image','audio','embeddings'],priority:97,fallback:['openrouter','gemini']},
   {id:'anthropic',name:'Anthropic',class:'reasoning',env:'ANTHROPIC_API_KEY',capabilities:['text','reasoning','coding'],priority:96,fallback:['openrouter','gemini']},
   {id:'deepseek',name:'DeepSeek',class:'reasoning',env:'DEEPSEEK_API_KEY',capabilities:['text','reasoning','coding'],priority:90,fallback:['openrouter','groq']},
@@ -27,8 +27,10 @@ export const ROUTE_POLICY={
   text:['openrouter','gemini','anthropic','deepseek','groq','mistral','together','fireworks','huggingface'],
   reasoning:['anthropic','openrouter','gemini','deepseek','mistral'],
   coding:['anthropic','openrouter','deepseek','gemini','groq'],
-  image:['fal','replicate','openai','gemini','huggingface'],
-  video:['fal','replicate','huggingface'],
+  image:['gemini','fal','replicate','openai','huggingface'],
+  video:['gemini','fal','replicate','huggingface'],
+  audio:['gemini','elevenlabs','deepgram','huggingface'],
+  music:['gemini','huggingface','fal','replicate'],
   tts:['elevenlabs','deepgram','gemini'],
   stt:['deepgram','gemini','elevenlabs'],
   search:['tavily','brave','exa'],
