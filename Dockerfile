@@ -13,7 +13,8 @@ ENV NODE_ENV=production \
     DB_PATH=/app/data/sq-ai.sqlite \
     FREE_VIDEO_SPACE=alexcheng0072/wan27-free-video-generator \
     FREE_VIDEO_DURATION_SECONDS=3 \
-    PAID_VIDEO_ENABLED=false
+    PAID_VIDEO_ENABLED=false \
+    MEDIA_PROMPT_ENHANCER=true
 
 EXPOSE 3000
 
@@ -22,4 +23,4 @@ USER node
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 
-CMD ["node", "--import", "./security-fix.mjs", "--import", "./sqai-bridge.mjs", "--import", "./route-order-fix.mjs", "--import", "./auto-recovery.mjs", "--import", "./billing-fix.mjs", "--import", "./ui-fix.mjs", "--import", "./video-fix.mjs", "--import", "./video-jobs-fix.mjs", "--import", "./ai-runtime-loader.mjs", "--import", "./ai-status.mjs", "server.js"]
+CMD ["node", "--import", "./security-fix.mjs", "--import", "./sqai-bridge.mjs", "--import", "./route-order-fix.mjs", "--import", "./auto-recovery.mjs", "--import", "./billing-fix.mjs", "--import", "./ui-fix.mjs", "--import", "./video-fix.mjs", "--import", "./video-jobs-fix.mjs", "--import", "./ai-runtime-loader.mjs", "--import", "./ai-status.mjs", "--import", "./media-studio-runtime.mjs", "--import", "./media-assets-fix.mjs", "server.js"]
