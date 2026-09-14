@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 
 const previousFetch = globalThis.fetch;
+const DEFAULT_NEGATIVE_PROMPT = 'nsfw, nudity, explicit content, watermark, text, signature, subtitles, low quality, blurry, deformed, disfigured, static frame';
 
 function platformDimensions(platform) {
   const p = String(platform || '').toLowerCase();
@@ -66,17 +67,36 @@ async function freeVideo(payload){
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),600000);
   const headers={'Content-Type':'application/json',Accept:'application/json',...authHeaders()};
-  const aspectRatio=`${width}x${height}`;
 
   try{
-    // Current Space API: optional image, prompt, aspect ratio, duration.
-    const submit=await requestWithRetry(`${base}/gradio_api/call/generate_video`,{method:'POST',headers,body:JSON.stringify({data:[null,prompt,aspectRatio,duration]})},controller,4);
+    // Current Space API signature (verified against its current app.py):
+    // input_image, prompt, height, width, negative_prompt, duration_seconds,
+    // guidance_scale, steps, seed, randomize_seed.
+    const dataPayload=[
+      null,
+      prompt,
+      height,
+      width,
+      DEFAULT_NEGATIVE_PROMPT,
+      duration,
+      0,
+      4,
+      42,
+      true
+    ];
+    const submit=await requestWithRetry(`${base}/gradio_api/call/generate_video`,{
+      method:'POST',
+      headers,
+      body:JSON.stringify({data:dataPayload})
+    },controller,4);
     const raw=await submit.text();
     let data={};try{data=JSON.parse(raw);}catch{}
-    if(!submit.ok)throw Object.assign(new Error(data?.error || `Free video service rejected the request (${submit.status}).`),{upstreamStatus:submit.status});
+    if(!submit.ok)throw Object.assign(new Error(data?.error || data?.message || `Free video service rejected the request (${submit.status}).`),{upstreamStatus:submit.status});
     if(!data.event_id)throw new Error('Free video service did not return an event id.');
 
-    const result=await requestWithRetry(`${base}/gradio_api/call/generate_video/${encodeURIComponent(data.event_id)}`,{headers:{Accept:'text/event-stream',...authHeaders()}},controller,4);
+    const result=await requestWithRetry(`${base}/gradio_api/call/generate_video/${encodeURIComponent(data.event_id)}`,{
+      headers:{Accept:'text/event-stream',...authHeaders()}
+    },controller,4);
     if(!result.ok)throw Object.assign(new Error(`Free video result request failed (${result.status}).`),{upstreamStatus:result.status});
 
     const stream=await result.text();
