@@ -101,9 +101,7 @@
     root.querySelectorAll('.result-box').forEach(box => {
       if (box.dataset.mediaRendered === '1') return;
       const value = box.dataset.videoUrl || box.dataset.imageUrl || box.textContent.trim();
-      if (renderVideoResult(box, value) || renderImageResult(box, value)) {
-        box.dataset.mediaRendered = '1';
-      }
+      if (renderVideoResult(box, value) || renderImageResult(box, value)) box.dataset.mediaRendered = '1';
     });
   }
 
@@ -111,19 +109,7 @@
     if (typeof window.extractOutput !== 'function' || window.__sqAiOutputPatched) return;
     const original = window.extractOutput;
     window.extractOutput = function(data) {
-      const candidates = [
-        data?.video_url,
-        data?.image_url,
-        data?.result?.video_url,
-        data?.result?.image_url,
-        data?.result,
-        data?.output?.video_url,
-        data?.output?.image_url,
-        data?.output,
-        data?.text,
-        data?.content,
-        data?.message
-      ];
+      const candidates = [data?.video_url,data?.image_url,data?.result?.video_url,data?.result?.image_url,data?.result,data?.output?.video_url,data?.output?.image_url,data?.output,data?.text,data?.content,data?.message];
       const media = candidates.find(value => typeof value === 'string' && (isVideoUrl(value) || isImageUrl(value)));
       if (media) return media;
       return original(data);
@@ -149,9 +135,7 @@
     window.fetch = async function(input, init = {}) {
       const url = typeof input === 'string' ? input : input?.url || '';
       const method = String(init?.method || (typeof input !== 'string' ? input?.method : 'GET') || 'GET').toUpperCase();
-      if (!/\/api\/tools\/generate(?:\?|$)/.test(url) || method !== 'POST') {
-        return originalFetch(input, init);
-      }
+      if (!/\/api\/tools\/generate(?:\?|$)/.test(url) || method !== 'POST') return originalFetch(input, init);
 
       const response = await originalFetch(input, init);
       if (response.status !== 202) return response;
@@ -162,11 +146,12 @@
       const jobId = payload.job_id;
       const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
       const started = Date.now();
-      const maxWait = 8 * 60 * 1000;
+      const maxWait = 15 * 60 * 1000;
       let last = payload;
       while (Date.now() - started < maxWait) {
-        await wait(2500);
-        const jobResponse = await originalFetch(`/api/tools/video-job/${encodeURIComponent(jobId)}`, { credentials:'same-origin' });
+        const delay = last?.status === 'queued' ? 3000 : 2500;
+        await wait(delay);
+        const jobResponse = await originalFetch(`/api/tools/video-job/${encodeURIComponent(jobId)}`, { credentials:'same-origin', cache:'no-store' });
         let job;
         try { job = await jobResponse.json(); } catch { job = null; }
         if (!jobResponse.ok) {
@@ -176,16 +161,10 @@
         }
         last = job || last;
         if (job?.status === 'completed' && job?.video_url) {
-          return new Response(JSON.stringify({
-            result:job.video_url,
-            video_url:job.video_url,
-            provider:job.provider || 'huggingface-zero-gpu',
-            free:true,
-            credits_remaining:job.credits_remaining
-          }), { status:200, headers:{'Content-Type':'application/json'} });
+          return new Response(JSON.stringify({ result:job.video_url, video_url:job.video_url, provider:job.provider || 'huggingface-zero-gpu', free:true, credits_remaining:job.credits_remaining }), { status:200, headers:{'Content-Type':'application/json'} });
         }
         if (job?.status === 'failed') {
-          return new Response(JSON.stringify({ error:job.error || 'video_generation_failed' }), { status:502, headers:{'Content-Type':'application/json'} });
+          return new Response(JSON.stringify({ error:job.error || 'video_generation_failed', credits_remaining:job.credits_remaining }), { status:502, headers:{'Content-Type':'application/json'} });
         }
       }
       return new Response(JSON.stringify({ error:'video_generation_timeout', job_id:jobId, status:last?.status || 'running' }), { status:504, headers:{'Content-Type':'application/json'} });
@@ -199,54 +178,39 @@
     window.saveAccount = async function() {
       const name = document.getElementById('settingsName')?.value.trim() || '';
       const button = document.querySelector('#settings-account .btn-primary');
-      if (!name) {
-        window.showToast?.('Enter your name first.');
-        return;
-      }
+      if (!name) { window.showToast?.('Enter your name first.'); return; }
       button?.classList.add('loading');
       try {
-        const data = await API.request('/api/account', {
-          method: 'PATCH',
-          body: JSON.stringify({ name })
-        });
-        if (data?.user) {
-          state.user = data.user;
-          window.updateUserUI?.();
-        }
+        const data = await API.request('/api/account', { method:'PATCH', body:JSON.stringify({name}) });
+        if (data?.user) { state.user=data.user; window.updateUserUI?.(); }
         window.showToast?.('Account saved.');
-      } catch (err) {
-        window.showToast?.(err?.message || 'Could not save account.');
-      } finally {
-        button?.classList.remove('loading');
-      }
+      } catch (err) { window.showToast?.(err?.message || 'Could not save account.'); }
+      finally { button?.classList.remove('loading'); }
     };
   }
 
   function patchPasswordMinimum() {
     const input = document.getElementById('authPassword');
     if (input) {
-      input.minLength = 8;
-      input.setAttribute('minlength', '8');
-      input.placeholder = 'At least 8 characters';
+      input.minLength=8;
+      input.setAttribute('minlength','8');
+      input.placeholder='At least 8 characters';
     }
   }
 
   function patchBillingAliases() {
     if (typeof window.startCheckout !== 'function' || window.__sqAiBillingPatched) return;
-    const original = window.startCheckout;
-    window.startCheckout = function(plan) {
-      const aliases = { pro: 'growth', business: 'scale' };
-      return original(aliases[plan] || plan);
-    };
-    window.__sqAiBillingPatched = true;
+    const original=window.startCheckout;
+    window.startCheckout=function(plan){const aliases={pro:'growth',business:'scale'};return original(aliases[plan] || plan);};
+    window.__sqAiBillingPatched=true;
   }
 
-  let scanQueued = false;
-  function scheduleScan() {
-    if (scanQueued) return;
-    scanQueued = true;
-    requestAnimationFrame(() => {
-      scanQueued = false;
+  let scanQueued=false;
+  function scheduleScan(){
+    if(scanQueued)return;
+    scanQueued=true;
+    requestAnimationFrame(()=>{
+      scanQueued=false;
       patchOutputExtractor();
       patchResultReader();
       patchVideoJobsFetch();
@@ -257,16 +221,12 @@
     });
   }
 
-  function init() {
+  function init(){
     scheduleScan();
-
-    const observer = new MutationObserver(scheduleScan);
-    observer.observe(document.body, { subtree: true, childList: true });
+    const observer=new MutationObserver(scheduleScan);
+    observer.observe(document.body,{subtree:true,childList:true});
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init, { once: true });
-  } else {
-    init();
-  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});
+  else init();
 })();
