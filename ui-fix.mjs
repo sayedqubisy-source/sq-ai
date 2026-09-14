@@ -9,7 +9,7 @@ process.env.FREE_VIDEO_DURATION_SECONDS = process.env.FREE_VIDEO_DURATION_SECOND
 process.env.PAID_VIDEO_ENABLED = process.env.PAID_VIDEO_ENABLED || 'false';
 
 const file = path.resolve('public/index.html');
-const marker = '<script src="/app-fixes.js?v=sqai-20260914"></script>';
+const marker = '<script src="/app-fixes.js?v=sqai-20260914b"></script>';
 const legalMarker = 'sqai-legal-links';
 const legalLinks = `\n    <div class="sqai-legal-links" style="margin-top:18px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;font-size:13px;opacity:.8">\n      <a href="/terms.html" rel="nofollow">Terms of Service</a>\n      <a href="/privacy.html" rel="nofollow">Privacy Notice</a>\n      <a href="/refund.html" rel="nofollow">Refund Policy</a>\n    </div>`;
 try {
