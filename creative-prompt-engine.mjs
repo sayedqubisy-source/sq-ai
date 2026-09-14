@@ -1,10 +1,13 @@
 import express from 'express';
 
-const MEDIA_TOOLS = new Set([
-  'text-image','product-image','ad-creative','background','enhance','thumbnail','social-image','variations',
-  'text-video','image-video','ad-video','product-video','reels','long-shorts','script-video','voiceover','subtitles','translation','resize','silence','noise','hooks-video',
-  'music','music-generation','audio','background-music','soundtrack','lyria'
-]);
+const IMAGE_TOOLS = new Set(['text-image','product-image','ad-creative','background','enhance','thumbnail','social-image','variations']);
+const VIDEO_TOOLS = new Set(['text-video','image-video','ad-video','product-video','reels','long-shorts','script-video','hooks-video']);
+const MUSIC_TOOLS = new Set(['music','music-generation','audio','background-music','soundtrack','lyria']);
+const VOICE_TOOLS = new Set(['voiceover']);
+const CAPTION_TOOLS = new Set(['subtitles']);
+const TRANSLATION_TOOLS = new Set(['translation']);
+const EDIT_TOOLS = new Set(['resize','silence','noise']);
+const MEDIA_TOOLS = new Set([...IMAGE_TOOLS,...VIDEO_TOOLS,...MUSIC_TOOLS,...VOICE_TOOLS,...CAPTION_TOOLS,...TRANSLATION_TOOLS,...EDIT_TOOLS]);
 
 const TEXT_TOOL_HINTS = {
   text:'Create a polished, useful, ready-to-publish answer. Follow the requested language, audience and tone. Do not invent facts.',
@@ -19,10 +22,14 @@ function mediaPrompt(tool,idea,body){
   const language=clean(body.language,50)||'English';
   const ratio=clean(body.aspectRatio,20)||'';
   const base=`USER IDEA:\n${idea}\n\nTOOL: ${tool}\nPLATFORM: ${platform}\nLANGUAGE: ${language}${ratio?`\nASPECT RATIO: ${ratio}`:''}`;
-  const common='Create the actual output, not an explanation. Preserve the user intent. Make the result production-ready, coherent, specific, and visually/audio compelling. Never add watermarks, logos, random text, or unrelated objects unless requested.';
-  if(tool.includes('image')) return `${common}\nFor image generation: specify subject, composition, environment, action/pose, camera/framing, lens, lighting, materials, colors, depth, realism/style, background and exact aspect ratio. If people are present, make anatomy, hands and facial features natural. If the user asks for product advertising, keep the product identity and proportions consistent.\n${base}`;
-  if(tool.includes('video')||['reels','long-shorts','script-video','voiceover','subtitles','translation','resize','silence','noise','hooks-video'].includes(tool)) return `${common}\nFor video generation: define subject, continuous action, setting, shot type, camera movement, lens/framing, lighting, atmosphere, realistic physics, continuity, timing and transitions. Keep the main subject consistent from start to finish. Add natural dialogue, ambience and sound effects only when appropriate. Optimize composition for the requested platform.\n${base}`;
-  if(['music','music-generation','audio','background-music','soundtrack','lyria'].includes(tool)) return `${common}\nFor music/audio generation: define genre, mood, tempo, instrumentation, rhythm, structure, dynamics, sound design, vocal/no-vocal direction and mix/master character. Keep it original and suitable for the stated use case.\n${base}`;
+  const common='Create the actual output, not an explanation. Preserve the user intent. Make the result production-ready, coherent, specific, and suitable for direct generation. Never add watermarks, logos, random text, or unrelated objects unless requested.';
+  if(IMAGE_TOOLS.has(tool)) return `${common}\nIMAGE: define subject, composition, environment, action/pose, camera/framing, lens, lighting, materials, colors, depth, realism/style, background and exact aspect ratio. Keep products consistent and people anatomically natural.\n${base}`;
+  if(VIDEO_TOOLS.has(tool)) return `${common}\nVIDEO: define the subject, continuous action, setting, shot type, camera movement, lens/framing, lighting, atmosphere, realistic physics, continuity, timing and transitions. Keep the main subject consistent from start to finish. Add natural dialogue, ambience and sound effects only when appropriate. Optimize composition for the requested platform.\n${base}`;
+  if(MUSIC_TOOLS.has(tool)) return `${common}\nMUSIC/AUDIO: define genre, mood, tempo/BPM, instrumentation, rhythm, structure, dynamics, sound design, vocal/no-vocal direction and mix/master character. Keep the composition original and suitable for the use case.\n${base}`;
+  if(VOICE_TOOLS.has(tool)) return `${common}\nVOICEOVER: define language, dialect, speaker character, age range, gender only if requested, emotion, pace, pronunciation, pauses, emphasis, clarity and recording style. Return a script/audio-ready direction, not visual instructions.\n${base}`;
+  if(CAPTION_TOOLS.has(tool)) return `${common}\nSUBTITLES: preserve the spoken meaning exactly, use the requested language, concise readable lines, natural segmentation and correct timing cues. Do not invent dialogue.\n${base}`;
+  if(TRANSLATION_TOOLS.has(tool)) return `${common}\nTRANSLATION: preserve meaning, context, names and intent; use natural target-language phrasing and the requested dialect. Do not add or remove information.\n${base}`;
+  if(EDIT_TOOLS.has(tool)) return `${common}\nMEDIA EDIT: apply only the requested transformation. Preserve the source content and quality, avoid unintended changes, and return an actionable processing specification.\n${base}`;
   return `${common}\n${base}`;
 }
 
