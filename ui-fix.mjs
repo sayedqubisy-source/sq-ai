@@ -8,6 +8,7 @@ process.env.FREE_VIDEO_DURATION_SECONDS = process.env.FREE_VIDEO_DURATION_SECOND
 process.env.PAID_VIDEO_ENABLED = process.env.PAID_VIDEO_ENABLED || 'false';
 process.env.VEO_MODEL = process.env.VEO_MODEL || 'veo-3.1-generate-preview';
 process.env.LYRIA_MODEL = process.env.LYRIA_MODEL || 'lyria-3.5';
+process.env.MEDIA_PROMPT_ENHANCER = process.env.MEDIA_PROMPT_ENHANCER || 'true';
 
 const indexFile=path.resolve('public/index.html');
 const toolsFile=path.resolve('public/tools.html');
