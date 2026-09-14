@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="SQ AI Tools Hub — AI tools, APIs, automation, content, marketing and developer resources.">
+<title>SQ AI — Tools Hub</title>
+<style>
+:root{--bg:#080a0f;--panel:#11151d;--panel2:#171c25;--line:rgba(255,255,255,.09);--text:#f5f7fb;--muted:#929aaa;--accent:#7c5cff;--good:#32d583}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 20% 0%,rgba(124,92,255,.13),transparent 30%),var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif}a{color:inherit;text-decoration:none}.wrap{max-width:1250px;margin:auto;padding:28px 20px 70px}.top{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:38px}.brand{font-weight:850;font-size:20px}.back{border:1px solid var(--line);background:var(--panel);padding:10px 14px;border-radius:11px}.hero{text-align:center;padding:35px 0}.hero h1{font-size:clamp(36px,6vw,68px);line-height:1;letter-spacing:-3px;margin:0}.hero h1 span{color:#a899ff}.hero p{max-width:760px;margin:18px auto;color:var(--muted);font-size:17px}.stats{display:flex;justify-content:center;gap:10px;flex-wrap:wrap;margin:24px 0}.stat{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:10px 15px;color:var(--muted)}.stat b{color:var(--text)}.controls{position:sticky;top:0;z-index:5;background:rgba(8,10,15,.9);backdrop-filter:blur(12px);padding:14px 0;border-bottom:1px solid var(--line);display:flex;gap:10px;flex-wrap:wrap}.search{flex:1;min-width:230px;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:13px 15px;outline:none}.filters{display:flex;gap:7px;flex-wrap:wrap}.filter{background:var(--panel);color:var(--muted);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer}.filter.active{background:rgba(124,92,255,.18);color:#fff;border-color:rgba(124,92,255,.4)}.section{margin-top:34px}.section h2{font-size:22px;margin:0 0 13px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(245px,1fr));gap:12px}.card{background:rgba(17,21,29,.9);border:1px solid var(--line);border-radius:15px;padding:16px;transition:.18s}.card:hover{transform:translateY(-2px);border-color:rgba(124,92,255,.38)}.card h3{margin:0 0 7px;font-size:16px}.desc{font-size:13px;color:var(--muted);min-height:39px}.meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}.tag{font-size:10px;padding:4px 7px;border-radius:999px;background:#202630;color:#bfc6d2}.tag.api{color:#9fe6c1;background:rgba(50,213,131,.09)}.tag.free{color:#bdb2ff;background:rgba(124,92,255,.1)}.open{display:inline-block;margin-top:13px;color:#bdb2ff;font-size:12px}.empty{display:none;text-align:center;color:var(--muted);padding:50px}.note{margin-top:40px;padding:18px;border:1px solid var(--line);background:var(--panel);border-radius:15px;color:var(--muted);font-size:13px}.note b{color:var(--text)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><div class="brand">✦ SQ AI <span style="color:#929aaa;font-weight:500">/ Tools Hub</span></div><a class="back" href="/">← SQ AI</a></div>
+<section class="hero"><h1>One Hub. <span>Thousands of tools.</span></h1><p>Discover AI models, APIs, video, images, audio, coding, automation, marketing and business tools that can extend SQ AI. This is a living catalog — not a promise that every listed service is directly integrated.</p><div class="stats"><div class="stat"><b id="count">0</b> tools</div><div class="stat"><b>50+</b> categories</div><div class="stat"><b>API</b> ready filter</div><div class="stat"><b>Free</b> filter</div></div></section>
+<div class="controls"><input id="search" class="search" placeholder="Search tools, APIs, use cases…"><div id="filters" class="filters"></div></div>
+<div id="sections"></div><div id="empty" class="empty">No matching tools found.</div>
+<div class="note"><b>How SQ AI should use this catalog:</b> catalog first, then integrate selectively. Prefer official APIs, open-source/self-hosted models, free tiers and multi-model gateways. Never expose provider API keys in the browser. Pricing, limits and availability can change, so verify the provider before production use.</div>
+</div>
+<script>
+const tools=[
+['AI Models & Gateways','OpenRouter','Multi-model LLM gateway; useful for routing and fallback','API','https://openrouter.ai/','paid'],
+['AI Models & Gateways','OpenAI','General AI, vision, agents and generation APIs','API','https://openai.com/','paid'],
+['AI Models & Gateways','Google Gemini','Multimodal AI and Google AI APIs','API','https://ai.google.dev/','free'],
+['AI Models & Gateways','Anthropic Claude','Reasoning, long-context and coding APIs','API','https://www.anthropic.com/','paid'],
+['AI Models & Gateways','Mistral AI','LLMs, OCR and embeddings','API','https://mistral.ai/','paid'],
+['AI Models & Gateways','Groq','Very fast inference for supported open models','API','https://groq.com/','free'],
+['AI Models & Gateways','DeepSeek','Low-cost reasoning and coding models','API','https://www.deepseek.com/','paid'],
+['AI Models & Gateways','Cohere','RAG, embeddings and reranking','API','https://cohere.com/','free'],
+['AI Models & Gateways','Together AI','Open-model inference and fine-tuning','API','https://www.together.ai/','paid'],
+['AI Models & Gateways','Fireworks AI','Fast model inference and media APIs','API','https://fireworks.ai/','paid'],
+['AI Models & Gateways','Replicate','Hosted open-source models','API','https://replicate.com/','paid'],
+['AI Models & Gateways','Hugging Face','Open models, datasets and inference','API','https://huggingface.co/','free'],
+['AI Models & Gateways','fal.ai','Generative image, video and audio inference','API','https://fal.ai/','paid'],
+['AI Models & Gateways','Amazon Bedrock','Managed foundation-model access','API','https://aws.amazon.com/bedrock/','paid'],
+['AI Models & Gateways','Google Vertex AI','Enterprise AI APIs and model platform','API','https://cloud.google.com/vertex-ai','paid'],
+['Image','Adobe Firefly','Generative image and design workflows','API','https://firefly.adobe.com/','paid'],
+['Image','Ideogram','Image generation with strong typography','Web','https://ideogram.ai/','free'],
+['Image','Leonardo AI','Image generation and creative assets','Web','https://leonardo.ai/','free'],
+['Image','Midjourney','High-quality image generation','Web','https://www.midjourney.com/','paid'],
+['Image','Black Forest Labs','FLUX image models','API','https://bfl.ai/','paid'],
+['Image','Stability AI','Image generation and editing models','API','https://stability.ai/','paid'],
+['Image','Canva','Design, templates and AI creative tools','Web','https://www.canva.com/','free'],
+['Image','Krea','Realtime image and creative generation','Web','https://www.krea.ai/','free'],
+['Image','Photoroom','Product image editing and backgrounds','API','https://www.photoroom.com/','free'],
+['Image','Remove.bg','Automatic background removal','API','https://www.remove.bg/','free'],
+['Image','Clipdrop','Image cleanup, relight and generation','API','https://clipdrop.co/','free'],
+['Video','Runway','Generative video and creative editing','Web','https://runwayml.com/','paid'],
+['Video','Kling AI','AI video generation','Web','https://klingai.com/','free'],
+['Video','Hailuo AI','Text/image-to-video generation','Web','https://hailuoai.video/','free'],
+['Video','Luma','Dream Machine video generation','Web','https://lumalabs.ai/','free'],
+['Video','Pika','Creative AI video effects and generation','Web','https://pika.art/','free'],
+['Video','HeyGen','Avatars, translation and AI video','API','https://www.heygen.com/','paid'],
+['Video','Synthesia','Business avatar video','Web','https://www.synthesia.io/','paid'],
+['Video','InVideo','AI-assisted video creation','Web','https://invideo.io/','free'],
+['Video','VEED','Online video editing and AI tools','Web','https://www.veed.io/','free'],
+['Video','Descript','Video/audio editing with AI transcription','Web','https://www.descript.com/','free'],
+['Video','CapCut','Video editing, captions and AI effects','Web','https://www.capcut.com/','free'],
+['Video','Higgsfield','AI video and creative production','Web','https://higgsfield.ai/','paid'],
+['Voice & Audio','ElevenLabs','Text-to-speech, dubbing and voice AI','API','https://elevenlabs.io/','free'],
+['Voice & Audio','Deepgram','Speech-to-text and voice APIs','API','https://deepgram.com/','free'],
+['Voice & Audio','Cartesia','Fast speech and voice agents','API','https://cartesia.ai/','paid'],
+['Voice & Audio','PlayHT','AI voice and speech','API','https://play.ht/','paid'],
+['Voice & Audio','Suno','AI music generation','Web','https://suno.com/','free'],
+['Voice & Audio','Udio','AI music generation','Web','https://www.udio.com/','free'],
+['Voice & Audio','AIVA','AI music composition','Web','https://www.aiva.ai/','free'],
+['Voice & Audio','AssemblyAI','Speech recognition and audio intelligence','API','https://www.assemblyai.com/','paid'],
+['Coding','GitHub Copilot','AI coding and code review','Web','https://github.com/features/copilot','paid'],
+['Coding','Cursor','AI-native coding editor','Web','https://www.cursor.com/','paid'],
+['Coding','Windsurf','AI coding IDE and agents','Web','https://windsurf.com/','paid'],
+['Coding','Replit','Cloud development with AI','Web','https://replit.com/','free'],
+['Coding','Claude Code','Agentic coding workflows','Web','https://www.anthropic.com/claude-code','paid'],
+['Coding','Aider','Open-source terminal coding agent','Open source','https://aider.chat/','free'],
+['Coding','Cline','Open-source coding agent for VS Code','Open source','https://cline.bot/','free'],
+['Coding','Continue','Open-source AI coding assistant','Open source','https://www.continue.dev/','free'],
+['Automation','n8n','Open-source workflow automation','Open source','https://n8n.io/','free'],
+['Automation','Make','Visual automation and integrations','Web','https://www.make.com/','free'],
+['Automation','Zapier','Large app automation ecosystem','Web','https://zapier.com/','free'],
+['Automation','Pipedream','Developer-first integrations and workflows','API','https://pipedream.com/','free'],
+['Automation','Browser Use','AI browser automation framework','Open source','https://github.com/browser-use/browser-use','free'],
+['Automation','Apify','Web scraping and automation actors','API','https://apify.com/','free'],
+['Research & Search','Perplexity','AI search and research','Web','https://www.perplexity.ai/','free'],
+['Research & Search','Tavily','Search API for AI agents','API','https://tavily.com/','free'],
+['Research & Search','Brave Search API','Search API for applications','API','https://brave.com/search/api/','free'],
+['Research & Search','Exa','Neural search for AI applications','API','https://exa.ai/','paid'],
+['Research & Search','Firecrawl','Web crawling and extraction for AI','API','https://www.firecrawl.dev/','free'],
+['Research & Search','Jina AI','Reader, embeddings and search APIs','API','https://jina.ai/','free'],
+['Marketing & Ads','Jasper','Marketing content and brand workflows','Web','https://www.jasper.ai/','paid'],
+['Marketing & Ads','Copy.ai','Marketing and sales content automation','Web','https://www.copy.ai/','free'],
+['Marketing & Ads','AdCreative.ai','Ad creative generation and optimization','Web','https://www.adcreative.ai/','paid'],
+['Marketing & Ads','Predis.ai','Social content and ads generation','Web','https://predis.ai/','free'],
+['Marketing & Ads','Buffer','Social scheduling and AI assistance','Web','https://buffer.com/','free'],
+['Marketing & Ads','Metricool','Social analytics and scheduling','Web','https://metricool.com/','free'],
+['Marketing & Ads','OpusClip','Long-video to short-video repurposing','Web','https://www.opus.pro/','free'],
+['Marketing & Ads','Vidyo.ai','Automatic short-form repurposing','Web','https://vidyo.ai/','free'],
+['Documents & OCR','Mistral OCR','Document OCR and structured extraction','API','https://mistral.ai/','API'],
+['Documents & OCR','Google Document AI','OCR and document processing','API','https://cloud.google.com/document-ai','paid'],
+['Documents & OCR','OCR.Space','OCR API with free tier','API','https://ocr.space/','free'],
+['Documents & OCR','Unstructured','Document parsing and RAG preparation','API','https://www.unstructured.io/','free'],
+['Data & Database','Supabase','Database, auth, storage and edge functions','API','https://supabase.com/','free'],
+['Data & Database','Firebase','App backend, auth and database','API','https://firebase.google.com/','free'],
+['Data & Database','Pinecone','Vector database for AI apps','API','https://www.pinecone.io/','free'],
+['Data & Database','Chroma','Open-source AI-native vector database','Open source','https://www.trychroma.com/','free'],
+['Deployment','Vercel','Frontend and serverless deployment','Web','https://vercel.com/','free'],
+['Deployment','Render','Web services and background workers','Web','https://render.com/','free'],
+['Deployment','Cloudflare','Workers, storage, AI and edge services','API','https://www.cloudflare.com/','free'],
+['Deployment','Railway','Simple app and database deployment','Web','https://railway.com/','paid'],
+['Payments','Paddle','Merchant of record and SaaS billing','API','https://www.paddle.com/','paid'],
+['Payments','Stripe','Payments, subscriptions and billing','API','https://stripe.com/','paid'],
+['Payments','Lemon Squeezy','SaaS payments and merchant of record','API','https://www.lemonsqueezy.com/','paid'],
+['Directories & Marketplaces','AI Tools Directory — Cocoon','Large categorized AI tool directory','Directory','https://mycocoon.life/tools','free'],
+['Directories & Marketplaces','AiMatch','AI tool comparison with API filters','Directory','https://aimatch.pro/','free'],
+['Directories & Marketplaces','AI API Market','API and AI model marketplace','Marketplace','https://api.market/','free'],
+['Directories & Marketplaces','AI Guerrilla API Directory','Free-tier API directory','Directory','https://aiguerrilla.net/api-keys/','free'],
+['Directories & Marketplaces','AIFOXX','AI directory with pricing and privacy filters','Directory','https://aifoxx.com/','free'],
+['Directories & Marketplaces','Vocino AI Tools','AI tools directory with API/self-hosted filters','Directory','https://ai.vocino.com/','free'],
+['Directories & Marketplaces','AI Agents Directory','AI agents and API-first tools directory','Directory','https://aiagentsdirectory.com/','free'],
+['Directories & Marketplaces','AI Toolbox','Curated AI tools by workflow','Directory','https://www.aitoolsx.online/','free']
+];
+
+const cats=['All',...new Set(tools.map(x=>x[0]))];let active='All';
+const filters=document.getElementById('filters');
+cats.forEach(c=>{const b=document.createElement('button');b.className='filter'+(c==='All'?' active':'');b.textContent=c;b.onclick=()=>{active=c;document.querySelectorAll('.filter').forEach(x=>x.classList.remove('active'));b.classList.add('active');render()};filters.appendChild(b)});
+const search=document.getElementById('search');search.addEventListener('input',render);
+function render(){const q=search.value.toLowerCase().trim();const groups={};tools.filter(x=>(active==='All'||x[0]===active)&&(!q||x.join(' ').toLowerCase().includes(q))).forEach(x=>(groups[x[0]]??=[]).push(x));const root=document.getElementById('sections');root.innerHTML='';let shown=0;for(const [cat,items] of Object.entries(groups)){shown+=items.length;const s=document.createElement('section');s.className='section';s.innerHTML='<h2>'+cat+' <span style="color:#687080;font-size:13px">'+items.length+'</span></h2><div class="grid"></div>';const grid=s.querySelector('.grid');items.forEach(x=>{const c=document.createElement('article');c.className='card';c.innerHTML='<h3>'+x[1]+'</h3><div class="desc">'+x[2]+'</div><div class="meta"><span class="tag">'+x[3]+'</span><span class="tag '+(x[5]==='free'?'free':'')+'">'+(x[5]==='free'?'Free / Freemium':x[5])+'</span></div><a class="open" href="'+x[4]+'" target="_blank" rel="noopener noreferrer">Open official site ↗</a>';grid.appendChild(c)});root.appendChild(s)}document.getElementById('count').textContent=shown||tools.length;document.getElementById('empty').style.display=shown?'none':'block'}
+render();
+</script>
+</body></html>
