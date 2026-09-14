@@ -32,6 +32,7 @@
     {key:'square', label:'مربع 1:1', desc:'Instagram • Facebook', platform:'square', cls:'s'}
   ];
   let selected = localStorage.getItem('sqai_video_size') || 'vertical';
+  let refreshTimer = null;
 
   function isVideoToolValue(value) {
     return /video|reel|short|ad[-_ ]?video|product[-_ ]?video/i.test(String(value || ''));
@@ -57,19 +58,22 @@
       panel.innerHTML = `<div class="sqai-video-size-title">مقاس الفيديو</div><div class="sqai-video-size-grid"></div>`;
     }
     const grid = panel.querySelector('.sqai-video-size-grid');
-    grid.innerHTML = '';
-    for (const item of sizes) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'sqai-video-size-btn' + (selected === item.key ? ' active' : '');
-      button.dataset.videoSize = item.key;
-      button.innerHTML = `<span class="sqai-ratio ${item.cls}"></span><strong>${item.label}</strong><span>${item.desc}</span>`;
-      button.addEventListener('click', () => {
-        selected = item.key;
-        localStorage.setItem('sqai_video_size', selected);
-        grid.querySelectorAll('.sqai-video-size-btn').forEach(x => x.classList.toggle('active', x === button));
-      });
-      grid.appendChild(button);
+    if (!grid.childElementCount) {
+      for (const item of sizes) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'sqai-video-size-btn' + (selected === item.key ? ' active' : '');
+        button.dataset.videoSize = item.key;
+        button.innerHTML = `<span class="sqai-ratio ${item.cls}"></span><strong>${item.label}</strong><span>${item.desc}</span>`;
+        button.addEventListener('click', () => {
+          selected = item.key;
+          localStorage.setItem('sqai_video_size', selected);
+          grid.querySelectorAll('.sqai-video-size-btn').forEach(x => x.classList.toggle('active', x === button));
+        });
+        grid.appendChild(button);
+      }
+    } else {
+      grid.querySelectorAll('.sqai-video-size-btn').forEach(button => button.classList.toggle('active', button.dataset.videoSize === selected));
     }
     const anchor = findAnchor();
     if (anchor && !panel.contains(anchor) && !panel.isConnected) anchor.parentNode?.insertBefore(panel, anchor);
@@ -85,6 +89,11 @@
     } else if (panel) {
       panel.style.display = 'none';
     }
+  }
+
+  function scheduleRefresh() {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(refreshPanel, 80);
   }
 
   function patchGenerateFetch() {
@@ -110,8 +119,8 @@
   function init() {
     patchGenerateFetch();
     refreshPanel();
-    const observer = new MutationObserver(() => refreshPanel());
-    observer.observe(document.body, {subtree:true, childList:true, attributes:true, attributeFilter:['class','aria-selected','aria-pressed','data-tool']});
+    const observer = new MutationObserver(scheduleRefresh);
+    observer.observe(document.body, {subtree:true, childList:true});
     document.addEventListener('click', () => setTimeout(refreshPanel, 30), true);
   }
 
