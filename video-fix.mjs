@@ -87,7 +87,6 @@ async function freeVideo(payload) {
   const space = process.env.FREE_VIDEO_SPACE || 'alexcheng0072/wan27-free-video-generator';
   const base = `https://${space.replace(/\/$/, '')}.hf.space`;
   const { width, height } = platformDimensions(payload.platform);
-  const aspect = `${width}x${height}`;
   const prompt = String(payload.prompt || '').trim().slice(0, 600);
   const duration = Math.min(5, Math.max(2, Number(process.env.FREE_VIDEO_DURATION_SECONDS || 3)));
   const controller = new AbortController();
@@ -95,11 +94,23 @@ async function freeVideo(payload) {
   const headers = { 'Content-Type': 'application/json', Accept: 'application/json', ...authHeaders() };
 
   try {
-    // IMPORTANT: the current public Space exposes generate_video with exactly
-    // four inputs: input_image, prompt, aspect_ratio, duration.
-    // Do not send the internal model parameters; the Space owns those values.
+    // The current public Space registers generate_video with 10 API inputs:
+    // image, prompt, height, width, negative prompt, duration, guidance scale,
+    // steps, seed and randomize-seed. Progress is injected by Gradio and is not
+    // part of the API input list.
     const body = JSON.stringify({
-      data: [null, prompt, aspect, duration]
+      data: [
+        null,
+        prompt,
+        height,
+        width,
+        'nsfw, nudity, explicit content, watermark, text, signature, subtitles, low quality, blurry, deformed, disfigured, static frame',
+        duration,
+        0,
+        4,
+        42,
+        true
+      ]
     });
 
     const submit = await requestWithRetry(`${base}/gradio_api/call/generate_video`, {
