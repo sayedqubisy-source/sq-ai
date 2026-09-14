@@ -129,6 +129,21 @@
     window.__sqAiResultReaderPatched = true;
   }
 
+  function videoProgress(message) {
+    const boxes = [...document.querySelectorAll('.result-box')].filter(box => !box.classList.contains('hidden'));
+    const box = boxes[0] || document.querySelector('.result-box');
+    if (!box || box.dataset.mediaRendered === '1') return;
+    box.style.whiteSpace = 'normal';
+    box.innerHTML = `<div style="display:grid;gap:8px"><strong>🎬 ${message}</strong><span style="color:var(--muted,#929aaa);font-size:13px">خدمة الفيديو المجانية تعمل على GPU خارجي، وقد تحتاج عدة دقائق حسب ضغط الخدمة.</span></div>`;
+  }
+
+  function describeVideoError(job) {
+    const code = String(job?.error || '').toLowerCase();
+    if (code.includes('timeout') || code.includes('queue') || code.includes('zero') || code.includes('tempor')) return 'خدمة الفيديو مشغولة حاليًا. حاول مرة أخرى بعد قليل.';
+    if (code.includes('safety')) return 'الطلب لم يجتز فحص المحتوى. جرّب وصفًا مختلفًا.';
+    return job?.error || 'فشل إنشاء الفيديو.';
+  }
+
   function patchVideoJobsFetch() {
     if (window.__sqAiVideoJobsFetchPatched) return;
     const originalFetch = window.fetch.bind(window);
@@ -146,9 +161,12 @@
       const jobId = payload.job_id;
       const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
       const started = Date.now();
-      const maxWait = 15 * 60 * 1000;
+      const maxWait = 20 * 60 * 1000;
       let last = payload;
+      videoProgress('جاري إنشاء الفيديو الخاص بك...');
+
       while (Date.now() - started < maxWait) {
+        const elapsed = Math.floor((Date.now() - started) / 1000);
         const delay = last?.status === 'queued' ? 3000 : 2500;
         await wait(delay);
         const jobResponse = await originalFetch(`/api/tools/video-job/${encodeURIComponent(jobId)}`, { credentials:'same-origin', cache:'no-store' });
@@ -157,17 +175,26 @@
         if (!jobResponse.ok) {
           last = job || last;
           if (jobResponse.status === 404) break;
+          videoProgress(`جاري معالجة الفيديو... ${elapsed}s`);
           continue;
         }
         last = job || last;
+        if (job?.status === 'queued') {
+          videoProgress(`الفيديو في طابور المعالجة... المحاولة ${job.attempts || 0}/${job.max_attempts || 3}`);
+          continue;
+        }
+        if (job?.status === 'running') {
+          videoProgress(`جاري إنشاء الفيديو... ${elapsed}s — المحاولة ${job.attempts || 1}/${job.max_attempts || 3}`);
+          continue;
+        }
         if (job?.status === 'completed' && job?.video_url) {
           return new Response(JSON.stringify({ result:job.video_url, video_url:job.video_url, provider:job.provider || 'huggingface-zero-gpu', free:true, credits_remaining:job.credits_remaining }), { status:200, headers:{'Content-Type':'application/json'} });
         }
         if (job?.status === 'failed') {
-          return new Response(JSON.stringify({ error:job.error || 'video_generation_failed', credits_remaining:job.credits_remaining }), { status:502, headers:{'Content-Type':'application/json'} });
+          return new Response(JSON.stringify({ error:job.error || 'video_generation_failed', message:describeVideoError(job), credits_remaining:job.credits_remaining }), { status:502, headers:{'Content-Type':'application/json'} });
         }
       }
-      return new Response(JSON.stringify({ error:'video_generation_timeout', job_id:jobId, status:last?.status || 'running' }), { status:504, headers:{'Content-Type':'application/json'} });
+      return new Response(JSON.stringify({ error:'video_generation_timeout', message:'استغرقت عملية إنشاء الفيديو وقتًا أطول من المتوقع. جرّب مرة أخرى.', job_id:jobId, status:last?.status || 'running' }), { status:504, headers:{'Content-Type':'application/json'} });
     };
     window.__sqAiVideoJobsFetchPatched = true;
   }
