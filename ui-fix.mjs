@@ -1,7 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Runtime defaults only. No provider request is made during startup.
 process.env.OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'openrouter/free';
 process.env.OPENROUTER_IMAGE_MODEL = process.env.OPENROUTER_IMAGE_MODEL || 'google/gemini-3.1-flash-image';
 process.env.FREE_VIDEO_SPACE = process.env.FREE_VIDEO_SPACE || 'alexcheng0072/wan27-free-video-generator';
@@ -10,17 +9,20 @@ process.env.PAID_VIDEO_ENABLED = process.env.PAID_VIDEO_ENABLED || 'false';
 
 const file=path.resolve('public/index.html');
 const marker='<script src="/app-fixes.js?v=sqai-20260914b"></script>';
+const runtimeMarker='<script defer src="/sq-ai-runtime.js?v=sqai-runtime-20260914"></script>';
 const themeMarker='<script defer src="/ui-theme.js?v=sqai-light-20260914"></script>';
-const toolsMarker='sqai-tools-hub-link';
 const legalMarker='sqai-legal-links';
-const toolsLink=`<a id="${toolsMarker}" href="/tools.html" style="display:inline-flex;align-items:center;gap:7px;border:1px solid rgba(124,92,255,.28);background:rgba(124,92,255,.10);padding:8px 12px;border-radius:10px;color:#d8d1ff;font-size:12px;font-weight:700">✦ Tools Hub</a>`;
+const toolsLink=`<a id="sqai-tools-hub-link" href="/tools.html" style="display:inline-flex;align-items:center;gap:7px;border:1px solid rgba(124,92,255,.28);background:rgba(124,92,255,.10);padding:8px 12px;border-radius:10px;color:#d8d1ff;font-size:12px;font-weight:700">✦ Tools Hub</a>`;
 const legalLinks=`\n    <div class="sqai-legal-links" style="margin-top:18px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;font-size:13px;opacity:.8">\n      <a href="/terms.html" rel="nofollow">Terms of Service</a>\n      <a href="/privacy.html" rel="nofollow">Privacy Notice</a>\n      <a href="/refund.html" rel="nofollow">Refund Policy</a>\n      ${toolsLink}\n    </div>`;
 try{
   if(fs.existsSync(file)){
     const original=fs.readFileSync(file,'utf8');
-    let html=original.replace(/\s*<script(?: defer)? src="\/app-fixes\.js(?:\?[^\"]*)?"><\/script>/g,'').replace(/\s*<script(?: defer)? src="\/ui-theme\.js(?:\?[^\"]*)?"><\/script>/g,'');
+    let html=original
+      .replace(/\s*<script(?: defer)? src="\/app-fixes\.js(?:\?[^\"]*)?"><\/script>/g,'')
+      .replace(/\s*<script(?: defer)? src="\/sq-ai-runtime\.js(?:\?[^\"]*)?"><\/script>/g,'')
+      .replace(/\s*<script(?: defer)? src="\/ui-theme\.js(?:\?[^\"]*)?"><\/script>/g,'');
     html=html.replace(/<\/head>/i,`  ${themeMarker}\n</head>`);
-    html=html.replace(/<\/body>/i,`  ${marker}\n</body>`);
+    html=html.replace(/<\/body>/i,`  ${runtimeMarker}\n  ${marker}\n</body>`);
     if(!html.includes(legalMarker)) html=html.replace(/<\/footer>/i,`${legalLinks}\n  </footer>`);
     if(html!==original)fs.writeFileSync(file,html,'utf8');
   }
