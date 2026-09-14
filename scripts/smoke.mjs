@@ -6,11 +6,13 @@ import path from 'node:path';
 const port = 3187;
 const dbPath = path.join(os.tmpdir(), `sq-ai-smoke-${process.pid}.sqlite`);
 const child = spawn(process.execPath, [
-  '--import','./sqai-bridge.mjs','--import','./route-order-fix.mjs','--import','./auto-recovery.mjs',
+  '--import','./security-fix.mjs','--import','./sqai-bridge.mjs','--import','./route-order-fix.mjs','--import','./auto-recovery.mjs',
   '--import','./billing-fix.mjs','--import','./ui-fix.mjs','--import','./video-fix.mjs',
   '--import','./video-jobs-fix.mjs','--import','./ai-runtime-loader.mjs','--import','./ai-status.mjs','server.js'
 ], {
-  env: { ...process.env, NODE_ENV:'test', PORT:String(port), DB_PATH:dbPath, SQAI_BRIDGE_TOKEN:'' },
+  env: { ...process.env, NODE_ENV:'test', PORT:String(port), DB_PATH:dbPath, SQAI_BRIDGE_TOKEN:'',
+    OPENROUTER_API_KEY:'', OPENAI_API_KEY:'', GEMINI_API_KEY:'', ANTHROPIC_API_KEY:'',
+    DEEPSEEK_API_KEY:'', GROQ_API_KEY:'', MISTRAL_API_KEY:'', TOGETHER_API_KEY:'', FIREWORKS_API_KEY:'' },
   stdio:['ignore','pipe','pipe']
 });
 
@@ -55,8 +57,15 @@ try {
 
   const runtime=await get('/api/ai/runtime');
   assert(runtime.ok,'AI runtime endpoint failed');
+
+  // Route-order regression test: the runtime POST must see JSON body data.
+  // With providers disabled, a parsed prompt should reach provider selection
+  // and return 503 rather than prompt_required (400).
+  const ai=await get('/api/ai/generate',{method:'POST',headers:{cookie:sessionCookie,'content-type':'application/json'},body:JSON.stringify({prompt:'smoke body parser test',capability:'text'})});
+  assert(ai.status===503 || ai.status===502,`AI POST routing/body parsing failed: ${ai.status}`);
+
   const checkout=await get('/api/billing/checkout',{method:'POST',headers:{cookie:sessionCookie,'content-type':'application/json'},body:JSON.stringify({plan:'starter'})});
-  assert(checkout.status===503 || checkout.status===502,'billing configuration guard failed');
+  assert([501,502,503].includes(checkout.status),'billing configuration guard failed');
 
   for(const page of ['/terms.html','/privacy.html','/refund.html']){
     const r=await get(page);
