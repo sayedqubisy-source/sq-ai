@@ -10,20 +10,18 @@ process.env.PAID_VIDEO_ENABLED = process.env.PAID_VIDEO_ENABLED || 'false';
 
 const file = path.resolve('public/index.html');
 const marker = '<script src="/app-fixes.js?v=sqai-20260914b"></script>';
+const themeMarker = '<script src="/ui-theme.js?v=sqai-light-20260914"></script>';
 const legalMarker = 'sqai-legal-links';
 const legalLinks = `\n    <div class="sqai-legal-links" style="margin-top:18px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;font-size:13px;opacity:.8">\n      <a href="/terms.html" rel="nofollow">Terms of Service</a>\n      <a href="/privacy.html" rel="nofollow">Privacy Notice</a>\n      <a href="/refund.html" rel="nofollow">Refund Policy</a>\n    </div>`;
 try {
   if (fs.existsSync(file)) {
     let html = fs.readFileSync(file, 'utf8');
-    const withoutOldMarker = html.replace(/\s*<script src="\/app-fixes\.js(?:\?[^\"]*)?"><\/script>/g, '');
-    if (!withoutOldMarker.includes(marker)) {
-      html = withoutOldMarker.replace(/<\/head>/i, `  ${marker}\n</head>`);
-    } else {
-      html = withoutOldMarker;
-    }
-    if (!html.includes(legalMarker)) {
-      html = html.replace(/<\/footer>/i, `${legalLinks}\n  </footer>`);
-    }
+    const withoutOldMarkers = html
+      .replace(/\s*<script src="\/app-fixes\.js(?:\?[^\"]*)?"><\/script>/g, '')
+      .replace(/\s*<script src="\/ui-theme\.js(?:\?[^\"]*)?"><\/script>/g, '');
+    html = withoutOldMarkers.replace(/<\/head>/i, `  ${themeMarker}\n</head>`);
+    html = html.replace(/<\/body>/i, `  ${marker}\n</body>`);
+    if (!html.includes(legalMarker)) html = html.replace(/<\/footer>/i, `${legalLinks}\n  </footer>`);
     if (html !== fs.readFileSync(file, 'utf8')) fs.writeFileSync(file, html, 'utf8');
   }
 } catch (error) {
