@@ -15,8 +15,7 @@ if (!express.application.__sqaiAiErrorVisibility) {
             return res.status(status).json({
               error: code || 'ai_generation_failed',
               message: String(err?.message || 'AI provider failed'),
-              provider_error: true,
-              credits_refunded: true
+              provider_error: true
             });
           }
         }
