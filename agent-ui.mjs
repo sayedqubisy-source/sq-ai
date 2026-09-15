@@ -6,19 +6,7 @@ const dbRoot = path.resolve(process.env.DB_PATH ? path.dirname(process.env.DB_PA
 const mediaDir = path.join(dbRoot, 'generated-media');
 fs.mkdirSync(mediaDir, { recursive: true });
 
-if (!express.application.__sqaiAgentUI) {
-  express.application.__sqaiAgentUI = true;
-  const originalSend = express.response.send;
-  const originalListen = express.application.listen;
-
-  express.application.listen = function patchedListen(...args) {
-    try { this.use('/generated-media', express.static(mediaDir, { maxAge: '1h' })); } catch {}
-    return originalListen.apply(this, args);
-  };
-
-  express.response.send = function patchedSend(body) {
-    if (typeof body === 'string' && body.includes('</body>') && body.includes('<html')) {
-      body = body.replace('</body>', `
+const agentMarkup = `
 <style>
 #sqai-agent-launcher{position:fixed;right:18px;bottom:18px;z-index:9999;border:1px solid rgba(124,92,255,.5);background:linear-gradient(135deg,#7c5cff,#4c8dff);color:#fff;border-radius:14px;padding:12px 16px;font-weight:800;box-shadow:0 12px 40px rgba(0,0,0,.35);cursor:pointer}
 #sqai-agent-panel{position:fixed;right:18px;bottom:76px;width:min(520px,calc(100vw - 36px));max-height:80vh;overflow:auto;z-index:9998;background:#10141c;color:#f5f7fb;border:1px solid rgba(255,255,255,.12);border-radius:18px;padding:18px;box-shadow:0 25px 80px rgba(0,0,0,.5);display:none;font-family:Inter,system-ui,sans-serif}
@@ -37,10 +25,40 @@ if (!express.application.__sqaiAgentUI) {
 </div>
 <script>
 (()=>{const q=id=>document.getElementById(id),panel=q('sqai-agent-panel'),status=q('sqai-agent-status'),result=q('sqai-agent-result');q('sqai-agent-launcher').onclick=()=>panel.style.display=panel.style.display==='block'?'none':'block';q('sqai-agent-close').onclick=()=>panel.style.display='none';q('sqai-agent-run').onclick=async()=>{const prompt=q('sqai-agent-prompt').value.trim();if(!prompt){status.textContent='اكتب وصف الفيديو الأول.';return}const btn=q('sqai-agent-run');btn.disabled=true;result.innerHTML='';status.textContent='جاري فهم الطلب وبناء السيناريو...';try{const r=await fetch('/api/agent/generate',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({prompt,mode:'all',aspectRatio:q('sqai-agent-ratio').value,resolution:q('sqai-agent-resolution').value,voice:true})});status.textContent='جاري توليد الصوت والفيديو MP4...';const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.message||d.error||('HTTP '+r.status));const url=d?.result?.video_url;if(!url)throw new Error('لم يرجع السيرفر ملف MP4');status.textContent='تم إنشاء الفيديو MP4 بنجاح.';result.innerHTML='<video controls playsinline src="'+url+'"></video><a class="sqai-agent-download" href="'+url+'" download>⬇ تحميل MP4</a>';if(d?.plan)result.innerHTML+='<div class="sqai-agent-plan">الخطة: '+JSON.stringify(d.plan,null,2).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]))+'</div>'}catch(e){status.textContent='فشل الإنشاء: '+(e?.message||e)}finally{btn.disabled=false}}})();
-</script>
-</body>`);
+</script>`;
+
+function inject(body){
+  if(typeof body!=='string'||!body.includes('</body>')||body.includes('id="sqai-agent-launcher"')) return body;
+  return body.replace('</body>',agentMarkup+'\n</body>');
+}
+
+if (!express.application.__sqaiAgentUI) {
+  express.application.__sqaiAgentUI = true;
+  const originalSend = express.response.send;
+  const originalSendFile = express.response.sendFile;
+  const originalListen = express.application.listen;
+
+  express.application.listen = function patchedListen(...args) {
+    try { this.use('/generated-media', express.static(mediaDir, { maxAge: '1h' })); } catch {}
+    return originalListen.apply(this, args);
+  };
+
+  express.response.send = function patchedSend(body) {
+    return originalSend.call(this, inject(body));
+  };
+
+  express.response.sendFile = function patchedSendFile(filePath, options, callback) {
+    if (path.basename(String(filePath)) === 'index.html') {
+      try {
+        const html = inject(fs.readFileSync(filePath, 'utf8'));
+        this.type('html');
+        return this.send(html);
+      } catch (e) {
+        if(typeof callback==='function') return callback(e);
+        return this.req.next?.(e);
+      }
     }
-    return originalSend.call(this, body);
+    return originalSendFile.call(this,filePath,options,callback);
   };
 }
 console.log('SQ AI Agent UI loaded');
