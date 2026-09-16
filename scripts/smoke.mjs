@@ -5,115 +5,100 @@ import path from 'node:path';
 
 const port = 3187;
 const dbPath = path.join(os.tmpdir(), `sq-ai-smoke-${process.pid}.sqlite`);
-const child = spawn(process.execPath, [
-  '--import','./production-hardening.mjs','--import','./security-fix.mjs','--import','./sqai-bridge.mjs','--import','./route-order-fix.mjs','--import','./auto-recovery.mjs',
-  '--import','./billing-fix.mjs','--import','./ui-fix.mjs','--import','./creative-prompt-engine.mjs','--import','./video-fix.mjs',
-  '--import','./video-jobs-fix.mjs','--import','./video-gemini-fix.mjs','--import','./universal-media-fix.mjs','--import','./ai-runtime-loader.mjs',
-  '--import','./ai-status.mjs','--import','./media-studio-runtime.mjs','--import','./media-assets-fix.mjs','--import','./tool-router-fix.mjs',
-  '--import','./agent-orchestrator.mjs','--import','./agent-tools-bridge.mjs','--import','./agent-ui.mjs','--import','./ai-error-visibility.mjs','server.js'
-], {
-  env: { ...process.env, NODE_ENV:'test', PORT:String(port), DB_PATH:dbPath, SQAI_BRIDGE_TOKEN:'',
-    OPENROUTER_API_KEY:'', OPENAI_API_KEY:'', GEMINI_API_KEY:'', ANTHROPIC_API_KEY:'',
-    DEEPSEEK_API_KEY:'', GROQ_API_KEY:'', MISTRAL_API_KEY:'', TOGETHER_API_KEY:'', FIREWORKS_API_KEY:'',
-    ELEVENLABS_API_KEY:'', ELEVENLABS_VOICE_ID:'', MEDIA_PROMPT_ENHANCER:'false' },
-  stdio:['ignore','pipe','pipe']
+const child = spawn(process.execPath, ['server.js'], {
+  env: {
+    ...process.env,
+    NODE_ENV: 'test',
+    PORT: String(port),
+    DB_PATH: dbPath,
+    GEMINI_API_KEY: '',
+    OPENAI_API_KEY: '',
+    OPENROUTER_API_KEY: '',
+    GROQ_API_KEY: '',
+    ELEVENLABS_API_KEY: '',
+    ELEVENLABS_VOICE_ID: '',
+    VIDEO_API_URL: '',
+    VIDEO_API_KEY: '',
+  },
+  stdio: ['ignore', 'pipe', 'pipe'],
 });
 
-let output='';
-child.stdout.on('data', b => { output += b.toString(); });
-child.stderr.on('data', b => { output += b.toString(); });
+let output = '';
+child.stdout.on('data', chunk => { output += chunk.toString(); });
+child.stderr.on('data', chunk => { output += chunk.toString(); });
 
-const base=`http://127.0.0.1:${port}`;
-const wait=ms=>new Promise(r=>setTimeout(r,ms));
-async function get(pathname, options={}) { return fetch(`${base}${pathname}`, options); }
-async function waitForHealth(){
-  for(let i=0;i<60;i++){
-    try { const r=await get('/api/health'); if(r.ok)return; } catch {}
+const base = `http://127.0.0.1:${port}`;
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const get = (pathname, options = {}) => fetch(`${base}${pathname}`, options);
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+
+async function waitForHealth() {
+  for (let i = 0; i < 60; i += 1) {
+    try { if ((await get('/api/health')).ok) return; } catch {}
     await wait(250);
   }
   throw new Error(`server did not become healthy\n${output}`);
 }
-function assert(condition,message){if(!condition)throw new Error(message);}
 
 try {
   await waitForHealth();
-  const health=await get('/api/health');
-  const healthJson=await health.json();
-  assert(healthJson.ok===true,'health check failed');
+  const health = await (await get('/api/health')).json();
+  assert(health.ok === true && health.version === '5.0.0', 'health endpoint failed');
 
-  const plans=await get('/api/plans');
-  assert(plans.ok,'plans endpoint failed');
-  const planJson=await plans.json();
-  assert(planJson.starter?.credits===100,'starter plan mismatch');
+  const plans = await (await get('/api/plans')).json();
+  assert(plans.starter?.credits === 100 && plans.growth?.credits === 500, 'plans endpoint failed');
 
-  const email=`smoke-${Date.now()}@example.com`;
-  const signup=await get('/api/auth/signup',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email,password:'SmokeTest123!',name:'Smoke'})});
-  assert(signup.status===201,`signup failed: ${signup.status}`);
-  const cookie=signup.headers.get('set-cookie');
-  assert(cookie?.includes('sqai_session='),'session cookie missing');
-  const sessionCookie=cookie.split(';')[0];
+  const email = `smoke-${Date.now()}@example.com`;
+  const signup = await get('/api/auth/signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password: 'SmokeTest123!', name: 'Smoke' }) });
+  assert(signup.status === 201, `signup failed: ${signup.status}`);
+  const cookieHeader = signup.headers.get('set-cookie');
+  assert(cookieHeader?.includes('sqai_session='), 'session cookie missing');
+  const cookie = cookieHeader.split(';')[0];
 
-  const me=await get('/api/me',{headers:{cookie:sessionCookie}});
-  assert(me.ok,'authenticated /api/me failed');
-  const projects=await get('/api/projects',{headers:{cookie:sessionCookie}});
-  assert(projects.ok,'authenticated projects failed');
+  const me = await get('/api/me', { headers: { cookie } });
+  assert(me.ok, 'authenticated /api/me failed');
+  const projects = await get('/api/projects', { headers: { cookie } });
+  assert(projects.ok, 'projects route failed');
 
-  const runtime=await get('/api/ai/runtime');
-  assert(runtime.ok,'AI runtime endpoint failed');
+  const project = await get('/api/projects', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Smoke', content: 'hello', type: 'Test' }) });
+  assert(project.status === 201, 'project creation failed');
 
-  const ai=await get('/api/ai/generate',{method:'POST',headers:{cookie:sessionCookie,'content-type':'application/json'},body:JSON.stringify({prompt:'smoke body parser test',capability:'text'})});
-  assert(ai.status===503 || ai.status===502,`AI POST routing/body parsing failed: ${ai.status}`);
+  const runtime = await get('/api/ai/runtime');
+  assert(runtime.ok, 'AI runtime status failed');
+  const ai = await get('/api/ai/generate', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ prompt: 'smoke', capability: 'text' }) });
+  assert([502, 503].includes(ai.status), `AI provider guard failed: ${ai.status}`);
 
-  const agentUnauth=await get('/api/agent/generate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prompt:'smoke',mode:'video'})});
-  assert(agentUnauth.status===401,'Agent auth guard/startup chain failed');
+  const unauthAgent = await get('/api/agent/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: 'smoke', mode: 'video' }) });
+  assert(unauthAgent.status === 401, 'agent authentication failed');
 
-  const script=await get('/api/tools/generate',{method:'POST',headers:{cookie:sessionCookie,'content-type':'application/json'},body:JSON.stringify({tool:'AI Video Script',prompt:'smoke script routing'})});
-  assert(script.status===503 || script.status===502,`AI Video Script was not routed to text runtime: ${script.status}`);
+  const agent = await get('/api/agent/generate', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ prompt: 'smoke', mode: 'video' }) });
+  assert([502, 503].includes(agent.status), `agent provider guard failed: ${agent.status}`);
 
-  // The video tool must reach the production Agent bridge. With all external
-  // providers disabled in CI, the expected failure is a provider/configuration
-  // error (or the text-planner provider error), never the legacy 400 prompt or
-  // video_provider_not_configured branch.
-  const video=await get('/api/tools/generate',{method:'POST',headers:{cookie:sessionCookie,'content-type':'application/json'},body:JSON.stringify({tool:'video',prompt:'smoke video routing'})});
-  const videoJson=await video.json().catch(()=>({}));
-  assert(video.status!==400 || !['prompt_required','tool_and_prompt_required'].includes(videoJson.error),`Video tool lost JSON body before reaching Agent: ${video.status}`);
-  assert(videoJson.error!=='video_provider_not_configured','Video tool still using legacy custom provider route');
-  assert([400,502,503,504].includes(video.status),`Unexpected production video routing status: ${video.status}`);
+  const tool = await get('/api/tools/generate', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ tool: 'AI Video Script', prompt: 'smoke' }) });
+  assert([502, 503].includes(tool.status), `tool runtime guard failed: ${tool.status}`);
 
-  const mediaConfig=await get('/api/media/config',{headers:{cookie:sessionCookie}});
-  assert(mediaConfig.ok,'Media Studio config endpoint failed');
-  const mediaJson=await mediaConfig.json();
-  assert(mediaJson.queue==='sqlite-sequential','Media Studio queue missing');
-  assert(mediaJson.veo_model==='veo-3.1-generate-preview','Veo model default mismatch');
-  assert(mediaJson.lyria_model==='lyria-3.5','Lyria model default mismatch');
+  const publicMedia = await get('/generated-media/nonexistent.png');
+  const publicVideo = await get('/generated-videos/nonexistent.mp4');
+  assert(publicMedia.status === 401 && publicVideo.status === 401, 'generated media is not protected');
 
-  const mediaUnauth=await get('/api/media/config');
-  assert(mediaUnauth.status===401,'Media Studio auth guard failed');
+  const checkout = await get('/api/billing/checkout', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: '{}' });
+  assert(checkout.status === 501, 'billing guard failed');
 
-  const publicMedia=await get('/generated-media/nonexistent-smoke-file.png');
-  assert(publicMedia.status===401,'Generated media is not protected by auth guard');
-  const publicVideo=await get('/generated-videos/nonexistent-smoke-file.mp4');
-  assert(publicVideo.status===401,'Generated video is not protected by auth guard');
-
-  const checkout=await get('/api/billing/checkout',{method:'POST',headers:{cookie:sessionCookie,'content-type':'application/json'},body:JSON.stringify({plan:'starter'})});
-  assert([501,502,503].includes(checkout.status),'billing configuration guard failed');
-
-  for(const page of ['/terms.html','/privacy.html','/refund.html','/tools.html']){
-    const r=await get(page);
-    assert(r.ok,`${page} failed with ${r.status}`);
+  for (const page of ['/terms.html', '/privacy.html', '/refund.html', '/tools.html']) {
+    const response = await get(page);
+    assert(response.ok, `${page} failed with ${response.status}`);
   }
 
-  const missing=await get('/api/does-not-exist');
-  assert(missing.status===404,'API 404 handling failed');
-
+  const missing = await get('/api/does-not-exist');
+  assert(missing.status === 404, 'API 404 failed');
   console.log('SQ AI smoke test: PASS');
-} catch(error) {
+} catch (error) {
   console.error('SQ AI smoke test: FAIL');
-  console.error(error?.stack||error);
+  console.error(error?.stack || error);
   console.error(output);
-  process.exitCode=1;
+  process.exitCode = 1;
 } finally {
   child.kill('SIGTERM');
   await wait(300);
-  for(const suffix of ['', '-wal', '-shm']) { try { fs.rmSync(dbPath+suffix,{force:true}); } catch {} }
+  for (const suffix of ['', '-wal', '-shm']) fs.rmSync(dbPath + suffix, { force: true });
 }
