@@ -33,13 +33,34 @@ app.use((req, res, next) => {
 });
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'SQ AI', version: '5.0.0', video_mode: env.paidVideoEnabled ? 'paid' : 'free' });
+  let database = 'ok';
+  try { db.prepare('SELECT 1 AS ok').get(); } catch { database = 'error'; }
+  res.json({ ok: database === 'ok', service: 'SQ AI', version: '5.1.0', database, video_mode: env.paidVideoEnabled ? 'paid' : 'free' });
 });
 app.get('/api/plans', (_req, res) => res.json(plans));
 app.use('/api', authRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/agent', agentRoutes);
+
+// Internal bridge used by the asynchronous video worker. The video provider
+// modules intercept this request before it leaves the process.
+app.post('/api/v1/videos', async (req, res) => {
+  if (req.get('authorization') !== 'Bearer free-local-video') return res.status(401).json({ error: 'internal_video_route' });
+  const prompt = clean(req.body?.prompt || req.body?.input, 6000);
+  if (!prompt) return res.status(400).json({ error: 'prompt_required' });
+  try {
+    const response = await fetch(`http://127.0.0.1:${env.port}/api/v1/videos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-SQ-AI-Provider-Bridge': '1' },
+      body: JSON.stringify({ prompt, platform: clean(req.body?.platform, 50) || 'vertical', tool: clean(req.body?.tool, 100) }),
+    });
+    const text = await response.text();
+    res.status(response.status).type(response.headers.get('content-type') || 'application/json').send(text);
+  } catch (error) {
+    res.status(502).json({ error: 'video_provider_request_failed', message: error?.message || 'Video provider request failed.' });
+  }
+});
 
 app.post('/api/tools/generate', requireAuth, async (req, res, next) => {
   const tool = clean(req.body?.tool, 100).toLowerCase();
