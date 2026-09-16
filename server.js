@@ -43,16 +43,22 @@ app.use('/api/projects', projectRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/agent', agentRoutes);
 
-// Internal bridge used by the asynchronous video worker. The video provider
-// modules intercept this request before it leaves the process.
+// Internal bridge used by the asynchronous video worker. The bridge secret is
+// generated per process unless explicitly supplied by the deployment environment.
+// The old public bearer token was intentionally removed because it was exposed in
+// the repository and could be replayed by an external caller.
+const videoBridgeSecret = process.env.SQ_AI_VIDEO_BRIDGE_SECRET || globalThis.__sqAiVideoBridgeSecret;
 app.post('/api/v1/videos', async (req, res) => {
-  if (req.get('authorization') !== 'Bearer free-local-video') return res.status(401).json({ error: 'internal_video_route' });
+  const suppliedSecret = req.get('x-sq-ai-internal-secret');
+  if (!videoBridgeSecret || !suppliedSecret || suppliedSecret !== videoBridgeSecret) {
+    return res.status(401).json({ error: 'internal_video_route' });
+  }
   const prompt = clean(req.body?.prompt || req.body?.input, 6000);
   if (!prompt) return res.status(400).json({ error: 'prompt_required' });
   try {
     const response = await fetch(`http://127.0.0.1:${env.port}/api/v1/videos`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-SQ-AI-Provider-Bridge': '1' },
+      headers: { 'Content-Type': 'application/json', 'X-SQ-AI-Provider-Bridge': '1', 'X-SQ-AI-Internal-Secret': videoBridgeSecret },
       body: JSON.stringify({ prompt, platform: clean(req.body?.platform, 50) || 'vertical', tool: clean(req.body?.tool, 100) }),
     });
     const text = await response.text();
