@@ -5,7 +5,19 @@ import path from 'node:path';
 
 const port = 3187;
 const dbPath = path.join(os.tmpdir(), `sq-ai-smoke-${process.pid}.sqlite`);
-const child = spawn(process.execPath, ['server.js'], {
+const child = spawn(process.execPath, [
+  '--import', './production-hardening.mjs',
+  '--import', './auto-recovery.mjs',
+  '--import', './billing-fix.mjs',
+  '--import', './ui-fix.mjs',
+  '--import', './creative-prompt-engine.mjs',
+  '--import', './video-fix.mjs',
+  '--import', './video-gemini-fix.mjs',
+  '--import', './video-jobs-fix.mjs',
+  '--import', './universal-media-fix.mjs',
+  '--import', './media-assets-fix.mjs',
+  'server.js',
+], {
   env: {
     ...process.env,
     NODE_ENV: 'test',
@@ -19,6 +31,8 @@ const child = spawn(process.execPath, ['server.js'], {
     ELEVENLABS_VOICE_ID: '',
     VIDEO_API_URL: '',
     VIDEO_API_KEY: '',
+    PADDLE_API_KEY: '',
+    PADDLE_WEBHOOK_SECRET: '',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -45,11 +59,13 @@ try {
   const healthResponse = await get('/api/health');
   const health = await healthResponse.json();
   assert(health.ok === true && health.version === '5.1.0' && health.database === 'ok', 'health endpoint failed');
+  assert(healthResponse.headers.get('x-request-id'), 'production request ID hardening missing');
+  assert(healthResponse.headers.get('permissions-policy') === 'camera=(), microphone=(), geolocation=()', 'production security headers missing');
 
   const plansResponse = await get('/api/plans');
   assert(plansResponse.ok, `plans endpoint failed: ${plansResponse.status}`);
   const plans = await plansResponse.json();
-  assert(plans.starter?.credits === 100 && plans.growth?.credits === 500, 'plans endpoint failed');
+  assert(plans.starter?.credits === 100 && plans.growth?.credits === 500 && plans.scale?.credits === 2000, 'plans endpoint failed');
 
   const email = `smoke-${Date.now()}@example.com`;
   const signup = await get('/api/auth/signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password: 'SmokeTest123!', name: 'Smoke' }) });
@@ -84,8 +100,15 @@ try {
   const publicVideo = await get('/generated-videos/nonexistent.mp4');
   assert(publicMedia.status === 401 && publicVideo.status === 401, 'generated media is not protected');
 
-  const checkout = await get('/api/billing/checkout', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: '{}' });
-  assert(checkout.status === 501, 'billing guard failed');
+  const checkout = await get('/api/billing/checkout', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ plan: 'starter' }) });
+  assert([400, 503].includes(checkout.status), `billing configuration guard failed: ${checkout.status}`);
+  assert(checkout.status !== 501, 'billing route is still the unpatched placeholder');
+
+  const webhook = await get('/api/webhooks/paddle', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert(webhook.status === 503, `Paddle webhook guard failed: ${webhook.status}`);
+
+  const unauthVideoJob = await get('/api/tools/video-job/smoke-missing');
+  assert(unauthVideoJob.status === 401, 'video job authentication failed');
 
   for (const page of ['/terms.html', '/privacy.html', '/refund.html', '/tools.html']) {
     const response = await get(page);
@@ -94,9 +117,9 @@ try {
 
   const missing = await get('/api/does-not-exist');
   assert(missing.status === 404, 'API 404 failed');
-  console.log('SQ AI smoke test: PASS');
+  console.log('SQ AI production smoke test: PASS');
 } catch (error) {
-  console.error('SQ AI smoke test: FAIL');
+  console.error('SQ AI production smoke test: FAIL');
   console.error(error?.stack || error);
   console.error(output);
   process.exitCode = 1;
