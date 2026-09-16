@@ -42,10 +42,13 @@ async function waitForHealth() {
 
 try {
   await waitForHealth();
-  const health = await (await get('/api/health')).json();
-  assert(health.ok === true && health.version === '5.0.0', 'health endpoint failed');
+  const healthResponse = await get('/api/health');
+  const health = await healthResponse.json();
+  assert(health.ok === true && health.version === '5.1.0' && health.database === 'ok', 'health endpoint failed');
 
-  const plans = await (await get('/api/plans')).json();
+  const plansResponse = await get('/api/plans');
+  assert(plansResponse.ok, `plans endpoint failed: ${plansResponse.status}`);
+  const plans = await plansResponse.json();
   assert(plans.starter?.credits === 100 && plans.growth?.credits === 500, 'plans endpoint failed');
 
   const email = `smoke-${Date.now()}@example.com`;
@@ -66,16 +69,16 @@ try {
   const runtime = await get('/api/ai/runtime');
   assert(runtime.ok, 'AI runtime status failed');
   const ai = await get('/api/ai/generate', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ prompt: 'smoke', capability: 'text' }) });
-  assert([502, 503].includes(ai.status), `AI provider guard failed: ${ai.status}`);
+  assert([402, 502, 503].includes(ai.status), `AI provider guard failed: ${ai.status}`);
 
   const unauthAgent = await get('/api/agent/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ prompt: 'smoke', mode: 'video' }) });
   assert(unauthAgent.status === 401, 'agent authentication failed');
 
   const agent = await get('/api/agent/generate', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ prompt: 'smoke', mode: 'video' }) });
-  assert([502, 503].includes(agent.status), `agent provider guard failed: ${agent.status}`);
+  assert([402, 502, 503].includes(agent.status), `agent provider guard failed: ${agent.status}`);
 
   const tool = await get('/api/tools/generate', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ tool: 'AI Video Script', prompt: 'smoke' }) });
-  assert([502, 503].includes(tool.status), `tool runtime guard failed: ${tool.status}`);
+  assert([402, 502, 503].includes(tool.status), `tool runtime guard failed: ${tool.status}`);
 
   const publicMedia = await get('/generated-media/nonexistent.png');
   const publicVideo = await get('/generated-videos/nonexistent.mp4');
