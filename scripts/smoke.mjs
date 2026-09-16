@@ -33,6 +33,7 @@ const child = spawn(process.execPath, [
     VIDEO_API_KEY: '',
     PADDLE_API_KEY: '',
     PADDLE_WEBHOOK_SECRET: '',
+    SQ_AI_VIDEO_BRIDGE_SECRET: '',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -66,6 +67,9 @@ try {
   assert(plansResponse.ok, `plans endpoint failed: ${plansResponse.status}`);
   const plans = await plansResponse.json();
   assert(plans.starter?.credits === 100 && plans.growth?.credits === 500 && plans.scale?.credits === 2000, 'plans endpoint failed');
+
+  const bridgeAttempt = await get('/api/v1/videos', { method: 'POST', headers: { authorization: 'Bearer free-local-video', 'content-type': 'application/json' }, body: JSON.stringify({ prompt: 'smoke' }) });
+  assert(bridgeAttempt.status === 401, 'legacy public video bridge token is still accepted');
 
   const email = `smoke-${Date.now()}@example.com`;
   const signup = await get('/api/auth/signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password: 'SmokeTest123!', name: 'Smoke' }) });
