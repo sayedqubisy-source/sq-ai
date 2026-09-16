@@ -10,10 +10,8 @@ if (!express.application.__sqaiProductionHardening) {
     { prefix: '/api/v1/videos', windowMs: 60 * 1000, max: 6 },
     { prefix: '/api/', windowMs: 60 * 1000, max: 120 },
   ];
-
-  express.application.use.call(express.application, (req, res, next) => {
-    const id = crypto.randomUUID();
-    res.setHeader('X-Request-Id', id);
+  const hardening = (req, res, next) => {
+    res.setHeader('X-Request-Id', crypto.randomUUID());
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -21,7 +19,6 @@ if (!express.application.__sqaiProductionHardening) {
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     res.setHeader('X-DNS-Prefetch-Control', 'off');
     if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
-
     if (!req.path.startsWith('/api/')) return next();
     const rule = limits.find(item => req.path === item.prefix || req.path.startsWith(item.prefix));
     if (!rule) return next();
@@ -40,8 +37,15 @@ if (!express.application.__sqaiProductionHardening) {
       return res.status(429).json({ error: 'rate_limited', retry_after_seconds: retryAfter });
     }
     next();
-  });
-
+  };
+  const originalUse = express.application.use;
+  express.application.use = function patchedUse(...args) {
+    if (!this.__sqaiHardeningInstalled) {
+      this.__sqaiHardeningInstalled = true;
+      originalUse.call(this, hardening);
+    }
+    return originalUse.apply(this, args);
+  };
   setInterval(() => {
     const cutoff = Date.now() - 15 * 60 * 1000;
     for (const [key, bucket] of buckets) if (bucket.startedAt < cutoff) buckets.delete(key);
