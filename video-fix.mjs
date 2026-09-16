@@ -146,7 +146,9 @@ async function freeVideo(payload){
 globalThis.fetch=async function videoSafeFetch(input,init={}){
   const url=typeof input==='string'?input:input?.url || '';
   const method=String(init.method || 'GET').toUpperCase();
-  if(url.endsWith('/api/v1/videos') && method==='POST' && typeof init.body==='string'){
+  const headers=new Headers(init.headers || {});
+  const isLocalVideoBridge=headers.get('X-SQ-AI-Provider-Bridge')==='1';
+  if(url.endsWith('/api/v1/videos') && method==='POST' && typeof init.body==='string' && isLocalVideoBridge){
     let payload;try{payload=JSON.parse(init.body);}catch{return previousFetch(input,init);}
     if(process.env.PAID_VIDEO_ENABLED!=='true')return freeVideo(payload);
   }
