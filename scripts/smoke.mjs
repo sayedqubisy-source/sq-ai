@@ -6,15 +6,16 @@ import path from 'node:path';
 const port = 3187;
 const dbPath = path.join(os.tmpdir(), `sq-ai-smoke-${process.pid}.sqlite`);
 const child = spawn(process.execPath, [
-  '--import','./security-fix.mjs','--import','./sqai-bridge.mjs','--import','./route-order-fix.mjs','--import','./auto-recovery.mjs',
-  '--import','./billing-fix.mjs','--import','./ui-fix.mjs','--import','./video-fix.mjs',
-  '--import','./video-jobs-fix.mjs','--import','./ai-runtime-loader.mjs','--import','./ai-status.mjs',
-  '--import','./media-studio-runtime.mjs','--import','./media-assets-fix.mjs','server.js'
+  '--import','./production-hardening.mjs','--import','./security-fix.mjs','--import','./sqai-bridge.mjs','--import','./route-order-fix.mjs','--import','./auto-recovery.mjs',
+  '--import','./billing-fix.mjs','--import','./ui-fix.mjs','--import','./creative-prompt-engine.mjs','--import','./video-fix.mjs',
+  '--import','./video-jobs-fix.mjs','--import','./video-gemini-fix.mjs','--import','./universal-media-fix.mjs','--import','./ai-runtime-loader.mjs',
+  '--import','./ai-status.mjs','--import','./media-studio-runtime.mjs','--import','./media-assets-fix.mjs','--import','./tool-router-fix.mjs',
+  '--import','./agent-orchestrator.mjs','--import','./agent-tools-bridge.mjs','--import','./agent-ui.mjs','--import','./ai-error-visibility.mjs','server.js'
 ], {
   env: { ...process.env, NODE_ENV:'test', PORT:String(port), DB_PATH:dbPath, SQAI_BRIDGE_TOKEN:'',
     OPENROUTER_API_KEY:'', OPENAI_API_KEY:'', GEMINI_API_KEY:'', ANTHROPIC_API_KEY:'',
     DEEPSEEK_API_KEY:'', GROQ_API_KEY:'', MISTRAL_API_KEY:'', TOGETHER_API_KEY:'', FIREWORKS_API_KEY:'',
-    MEDIA_PROMPT_ENHANCER:'false' },
+    ELEVENLABS_API_KEY:'', ELEVENLABS_VOICE_ID:'', MEDIA_PROMPT_ENHANCER:'false' },
   stdio:['ignore','pipe','pipe']
 });
 
@@ -65,6 +66,23 @@ try {
   // and return 503 rather than prompt_required (400).
   const ai=await get('/api/ai/generate',{method:'POST',headers:{cookie:sessionCookie,'content-type':'application/json'},body:JSON.stringify({prompt:'smoke body parser test',capability:'text'})});
   assert(ai.status===503 || ai.status===502,`AI POST routing/body parsing failed: ${ai.status}`);
+
+  // Production agent must be loaded in the same startup chain as deployment.
+  const agentUnauth=await get('/api/agent/generate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prompt:'smoke',mode:'video'})});
+  assert(agentUnauth.status===401,'Agent auth guard/startup chain failed');
+
+  // Script tools must stay on the text runtime and not be redirected to the agent.
+  const script=await get('/api/tools/generate',{method:'POST',headers:{cookie:sessionCookie,'content-type':'application/json'},body:JSON.stringify({tool:'AI Video Script',prompt:'smoke script routing'})});
+  assert(script.status===503 || script.status===502,`AI Video Script was not routed to text runtime: ${script.status}`);
+
+  // A production video tool should be intercepted by the agent bridge before
+  // the legacy custom video provider path. With no video provider configured,
+  // it should fail from the agent path after authentication rather than from
+  // the old provider_not_configured branch.
+  const video=await get('/api/tools/generate',{method:'POST',headers:{cookie:sessionCookie,'content-type':'application/json'},body:JSON.stringify({tool:'video',prompt:'smoke video routing'})});
+  assert([502,503].includes(video.status),`Video tool routing failed unexpectedly: ${video.status}`);
+  const videoJson=await video.json().catch(()=>({}));
+  assert(videoJson.error!=='video_provider_not_configured','Video tool still using legacy custom provider route');
 
   const mediaConfig=await get('/api/media/config',{headers:{cookie:sessionCookie}});
   assert(mediaConfig.ok,'Media Studio config endpoint failed');
