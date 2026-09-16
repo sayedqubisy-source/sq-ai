@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import Database from 'better-sqlite3';
 
 // Keep generated media behind the same session/API-key boundary as the app.
-// This is installed before server.js registers the /generated-videos static route.
+// This is installed before server.js registers the static media routes.
 const originalUse = express.application.use;
 if (!originalUse.__sqAiPrivateMedia) {
   const dbPath = process.env.DB_PATH || './data/sq-ai.sqlite';
@@ -45,7 +45,7 @@ if (!originalUse.__sqAiPrivateMedia) {
     next();
   };
   const wrapped = function patchedUse(first, ...handlers) {
-    if (first === '/generated-videos' && handlers.length) {
+    if ((first === '/generated-videos' || first === '/generated-media') && handlers.length) {
       return originalUse.call(this, first, guard, ...handlers);
     }
     return originalUse.call(this, first, ...handlers);
