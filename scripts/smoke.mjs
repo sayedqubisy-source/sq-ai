@@ -61,28 +61,24 @@ try {
   const runtime=await get('/api/ai/runtime');
   assert(runtime.ok,'AI runtime endpoint failed');
 
-  // Route-order regression test: the runtime POST must see JSON body data.
-  // With providers disabled, a parsed prompt should reach provider selection
-  // and return 503 rather than prompt_required (400).
   const ai=await get('/api/ai/generate',{method:'POST',headers:{cookie:sessionCookie,'content-type':'application/json'},body:JSON.stringify({prompt:'smoke body parser test',capability:'text'})});
   assert(ai.status===503 || ai.status===502,`AI POST routing/body parsing failed: ${ai.status}`);
 
-  // Production agent must be loaded in the same startup chain as deployment.
   const agentUnauth=await get('/api/agent/generate',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prompt:'smoke',mode:'video'})});
   assert(agentUnauth.status===401,'Agent auth guard/startup chain failed');
 
-  // Script tools must stay on the text runtime and not be redirected to the agent.
   const script=await get('/api/tools/generate',{method:'POST',headers:{cookie:sessionCookie,'content-type':'application/json'},body:JSON.stringify({tool:'AI Video Script',prompt:'smoke script routing'})});
   assert(script.status===503 || script.status===502,`AI Video Script was not routed to text runtime: ${script.status}`);
 
-  // A production video tool should be intercepted by the agent bridge before
-  // the legacy custom video provider path. With no video provider configured,
-  // it should fail from the agent path after authentication rather than from
-  // the old provider_not_configured branch.
+  // The video tool must reach the production Agent bridge. With all external
+  // providers disabled in CI, the expected failure is a provider/configuration
+  // error (or the text-planner provider error), never the legacy 400 prompt or
+  // video_provider_not_configured branch.
   const video=await get('/api/tools/generate',{method:'POST',headers:{cookie:sessionCookie,'content-type':'application/json'},body:JSON.stringify({tool:'video',prompt:'smoke video routing'})});
-  assert([502,503].includes(video.status),`Video tool routing failed unexpectedly: ${video.status}`);
   const videoJson=await video.json().catch(()=>({}));
+  assert(video.status!==400 || !['prompt_required','tool_and_prompt_required'].includes(videoJson.error),`Video tool lost JSON body before reaching Agent: ${video.status}`);
   assert(videoJson.error!=='video_provider_not_configured','Video tool still using legacy custom provider route');
+  assert([400,502,503,504].includes(video.status),`Unexpected production video routing status: ${video.status}`);
 
   const mediaConfig=await get('/api/media/config',{headers:{cookie:sessionCookie}});
   assert(mediaConfig.ok,'Media Studio config endpoint failed');
@@ -93,6 +89,11 @@ try {
 
   const mediaUnauth=await get('/api/media/config');
   assert(mediaUnauth.status===401,'Media Studio auth guard failed');
+
+  const publicMedia=await get('/generated-media/nonexistent-smoke-file.png');
+  assert(publicMedia.status===401,'Generated media is not protected by auth guard');
+  const publicVideo=await get('/generated-videos/nonexistent-smoke-file.mp4');
+  assert(publicVideo.status===401,'Generated video is not protected by auth guard');
 
   const checkout=await get('/api/billing/checkout',{method:'POST',headers:{cookie:sessionCookie,'content-type':'application/json'},body:JSON.stringify({plan:'starter'})});
   assert([501,502,503].includes(checkout.status),'billing configuration guard failed');
