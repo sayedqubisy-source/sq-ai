@@ -63,7 +63,7 @@ Abasthan can auto-deploy the `main` branch. The application listens on `process.
 
 ## Media providers
 
-Text generation uses the first configured provider supported by `ai/runtime.mjs`. Image generation requires `GEMINI_API_KEY`. Music uses the public MusicGen Space by default and can use `HF_TOKEN` for authenticated Hugging Face requests. Free video does not call Veo even when a Gemini key is configured. Paid video requires `PAID_VIDEO_ENABLED=true` and either a custom video API or a Gemini key.
+Text generation uses the first configured provider supported by `ai/runtime.mjs`. Image generation requires `GEMINI_API_KEY`. Music uses the public MusicGen Space by default and can use `HF_TOKEN` for authenticated Hugging Face requests. Free video does not call Veo even when a Gemini key is configured. Setting `FAL_KEY` enables paid Wan 2.2 Turbo video automatically; `FAL_VIDEO_RESOLUTION` controls its 480p, 580p, or 720p tier. Other paid video providers require `PAID_VIDEO_ENABLED=true` and either a custom video API or a Gemini key.
 
 All interface scripts are included directly in the static pages. Startup does not rewrite application source files.
 

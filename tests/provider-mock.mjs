@@ -4,6 +4,15 @@ globalThis.fetch = async (input, init = {}) => {
   const url = String(input?.url || input);
   if (url.startsWith('http://127.0.0.1:')) return realFetch(input, init);
   if (url === 'https://video.test/generate') return Response.json({ video_url: 'https://video.test/output.mp4', provider: 'custom' });
+  const falBase = 'https://queue.fal.run/fal-ai/wan/v2.2-a14b/text-to-video/turbo';
+  const falQueue = 'https://queue.fal.run/fal-ai/wan';
+  if (url === falBase) {
+    const body = JSON.parse(init.body);
+    if (body.resolution !== '720p' || !['16:9', '9:16', '1:1'].includes(body.aspect_ratio)) throw new Error('Invalid fal Wan Turbo contract');
+    return Response.json({ request_id: 'fal-event', status: 'IN_QUEUE' });
+  }
+  if (url.startsWith(`${falQueue}/requests/fal-event/status`)) return Response.json({ status: 'COMPLETED', logs: [] });
+  if (url === `${falQueue}/requests/fal-event`) return Response.json({ video: { url: 'https://video.test/fal-output.mp4' }, seed: 1 });
   if (url === 'https://openrouter.ai/api/v1/chat/completions') {
     const body = JSON.parse(init.body);
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -36,5 +45,5 @@ globalThis.fetch = async (input, init = {}) => {
   if (url === `${base}/gradio_api/call/generate_video/failed-event`) return new Response('event: error\ndata: "GPU quota exceeded"\n\n');
   if (url === `${base}/gradio_api/call/generate_video/test-event`) return new Response('event: complete\ndata: [{"video":{"url":"' + base + '/test.mp4"},"subtitles":null},42]\n\n');
   if (url === `${base}/test.mp4`) return new Response(new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]), { headers: { 'content-type': 'video/mp4' } });
-  throw new Error(`Unexpected external request in test: ${new URL(url).origin}`);
+  throw new Error(`Unexpected external request in test: ${url}`);
 };
