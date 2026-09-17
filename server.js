@@ -20,7 +20,9 @@ app.disable('x-powered-by');
 app.set('trust proxy', env.trustProxy);
 app.use(securityMiddleware);
 registerBillingWebhook(app);
-app.use(express.json({ limit: '2mb' }));
+// Image-to-video accepts an authenticated base64 image (8 MB max before
+// encoding). Keep this bounded so uploads cannot grow request memory freely.
+app.use(express.json({ limit: '12mb' }));
 
 app.get('/api/health', (_req, res) => {
   let database = 'ok';

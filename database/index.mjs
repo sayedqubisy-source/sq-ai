@@ -85,6 +85,7 @@ db.transaction(() => {
   addColumn('projects', 'updated_at', 'TEXT');
   addColumn('users', 'paddle_subscription_id', 'TEXT');
   addColumn('users', 'billing_status', "TEXT DEFAULT 'inactive'");
+  addColumn('video_jobs', 'source_image_url', 'TEXT');
   db.exec(`
     UPDATE projects SET updated_at = COALESCE(created_at, CURRENT_TIMESTAMP) WHERE updated_at IS NULL;
     CREATE TRIGGER IF NOT EXISTS projects_timestamp_after_insert
