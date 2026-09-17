@@ -11,15 +11,16 @@ const number = (value, fallback, max = Number.MAX_SAFE_INTEGER) => {
 };
 
 const dbPath = process.env.DB_PATH || './data/sq-ai.sqlite';
+const nodeEnv = process.env.NODE_ENV || 'production';
 
 export const env = Object.freeze({
-  nodeEnv: process.env.NODE_ENV || 'development',
+  nodeEnv,
   port: number(process.env.PORT, 3000, 65535),
   // Trust only the configured number of reverse-proxy hops; default to none.
   trustProxy: process.env.TRUST_PROXY === 'true' ? 1 : number(process.env.TRUST_PROXY, false, 16),
   dbPath,
   dbDirectory: path.dirname(path.resolve(dbPath)),
-  isProduction: (process.env.NODE_ENV || 'development') === 'production',
+  isProduction: nodeEnv === 'production',
   sessionDays: number(process.env.SESSION_DAYS, 30, 365),
   requestTimeoutMs: number(process.env.REQUEST_TIMEOUT_MS, 180000, 600000),
   agentTimeoutMs: number(process.env.AGENT_TIMEOUT_MS, 600000, 900000),

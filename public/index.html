@@ -2446,6 +2446,32 @@
 
     const API = {
 
+      async waitUntilReady(maxAttempts = 12) {
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+
+          try {
+            const response = await fetch("/api/health", {
+              cache: "no-store",
+              credentials: "include",
+              headers: { "X-Wake-Poll": "1" }
+            });
+
+            const contentType = response.headers.get("content-type") || "";
+            if (response.ok && contentType.includes("application/json")) {
+              const health = await response.json();
+              if (health.ok) return health;
+            }
+          } catch {}
+
+          if (attempt < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 3000));
+          }
+        }
+
+        throw new Error("The server is still waking up. Please try again in a moment.");
+      },
+
       async request(url, options = {}) {
 
         const config = {
@@ -3034,6 +3060,14 @@
       try {
 
         let data;
+
+        submit.textContent = "Waking server...";
+        await API.waitUntilReady();
+
+        submit.textContent =
+          state.authMode === "login"
+            ? "Signing in..."
+            : "Creating...";
 
         if (state.authMode === "login") {
 
