@@ -10,7 +10,8 @@ import crypto from 'node:crypto';
 import Database from 'better-sqlite3';
 
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-for (const paid of [false, true]) test(`production routes (${paid ? 'paid' : 'free'} video): auth, billing, credits, projects and throttling`, { timeout: 30000 }, async t => {
+for (const provider of ['free', 'custom', 'fal']) test(`production routes (${provider} video): auth, billing, credits, projects and throttling`, { timeout: 30000 }, async t => {
+  const paid = provider !== 'free';
   const socket = net.createServer();
   socket.listen(0, '127.0.0.1'); await once(socket, 'listening');
   const port = socket.address().port; await new Promise(resolve => socket.close(resolve));
@@ -21,8 +22,9 @@ for (const paid of [false, true]) test(`production routes (${paid ? 'paid' : 'fr
     env: { ...process.env, NODE_ENV: 'test', PORT: String(port), DB_PATH: dbPath, TRUST_PROXY: 'false',
       GEMINI_API_KEY: '', OPENAI_API_KEY: '', GROQ_API_KEY: '', OPENROUTER_API_KEY: 'test-only',
       PADDLE_API_KEY: '', PADDLE_WEBHOOK_SECRET: 'test-webhook-secret', PADDLE_PRICE_GROWTH: 'pri_growth',
-      PAID_VIDEO_ENABLED: String(paid), FREE_VIDEO_SPACE: 'alexcheng0072/wan27-free-video-generator', FREE_VIDEO_SPACE_URL: '',
-      VIDEO_API_URL: paid ? 'https://video.test/generate' : '', VIDEO_API_KEY: paid ? 'test-only' : '', HF_TOKEN: '' },
+      PAID_VIDEO_ENABLED: provider === 'custom' ? 'true' : 'false', FREE_VIDEO_SPACE: 'alexcheng0072/wan27-free-video-generator', FREE_VIDEO_SPACE_URL: '',
+      VIDEO_API_URL: provider === 'custom' ? 'https://video.test/generate' : '', VIDEO_API_KEY: provider === 'custom' ? 'test-only' : '',
+      FAL_KEY: provider === 'fal' ? 'test-fal-key' : '', HF_TOKEN: '' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let logs = ''; let database;
@@ -94,7 +96,8 @@ for (const paid of [false, true]) test(`production routes (${paid ? 'paid' : 'fr
     let result;
     for (let i = 0; i < 40; i++) { result = await (await request(`/api/tools/video-job/${job.job_id}`, { headers: { cookie } })).json(); if (result.status !== 'running') break; await wait(25); }
     assert.equal(result.status, 'completed', JSON.stringify(result));
-    if (paid) { assert.equal(result.provider, 'custom'); assert.equal(result.video_url, 'https://video.test/output.mp4'); return; }
+    if (provider === 'custom') { assert.equal(result.provider, 'custom'); assert.equal(result.video_url, 'https://video.test/output.mp4'); return; }
+    if (provider === 'fal') { assert.equal(result.provider, 'fal-wan-turbo'); assert.equal(result.video_url, 'https://video.test/fal-output.mp4'); return; }
     const media = await request(result.video_url, { headers: { cookie } });
     assert.equal(media.status, 200); assert.equal(media.headers.get('cache-control'), 'private, no-store');
     assert.equal((await request(result.video_url)).status, 401);

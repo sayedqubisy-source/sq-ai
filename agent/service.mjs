@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createFalClient } from '@fal-ai/client';
 import { env } from '../config/env.mjs';
 import { generateText } from '../ai/runtime.mjs';
 import { saveBuffer, localPath, videoRoot } from '../media/store.mjs';
@@ -83,6 +84,30 @@ export async function generateVoice(text, voiceId) {
 }
 
 export async function generateVideo(prompt, options = {}) {
+  if (env.falKey) {
+    const fal = createFalClient({ credentials: env.falKey });
+    const aspectRatio = ['9:16', '1:1'].includes(options.aspectRatio) ? options.aspectRatio : '16:9';
+    const result = await fal.subscribe(env.falVideoModel, {
+      input: {
+        prompt: clean(prompt),
+        resolution: env.falVideoResolution,
+        aspect_ratio: aspectRatio,
+        enable_safety_checker: true,
+        enable_output_safety_checker: true,
+        enable_prompt_expansion: false,
+        acceleration: 'regular',
+        video_quality: 'high',
+        video_write_mode: 'fast',
+      },
+      pollInterval: 1000,
+      timeout: env.agentTimeoutMs,
+    });
+    const data = result?.data || result;
+    const url = data?.video?.url || data?.video_url || data?.url;
+    if (!url) throw Object.assign(new Error('fal_video_output_missing'), { status: 502 });
+    return { url, provider: 'fal-wan-turbo', model: env.falVideoModel };
+  }
+
   if (env.videoApiUrl && env.videoApiKey) {
     const response = await request(env.videoApiUrl, {
       method: 'POST',
