@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createFalClient } from '@fal-ai/client';
@@ -9,6 +11,14 @@ import { saveBuffer, localPath, videoRoot } from '../media/store.mjs';
 const execFileAsync = promisify(execFile);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const clean = (value, max = 12000) => String(value ?? '').trim().slice(0, max);
+
+function localImageDataUrl(publicUrl) {
+  const file = localPath(publicUrl);
+  if (!file) return clean(publicUrl, 12 * 1024 * 1024);
+  const extension = path.extname(file).toLowerCase();
+  const mime = extension === '.png' ? 'image/png' : extension === '.webp' ? 'image/webp' : 'image/jpeg';
+  return `data:${mime};base64,${fs.readFileSync(file).toString('base64')}`;
+}
 
 async function request(url, options = {}, timeoutMs = env.agentTimeoutMs) {
   const controller = new AbortController();
@@ -86,20 +96,24 @@ export async function generateVoice(text, voiceId) {
 export async function generateVideo(prompt, options = {}) {
   if (env.falKey) {
     const fal = createFalClient({ credentials: env.falKey });
+    const hasSourceImage = Boolean(options.imageUrl);
+    const model = hasSourceImage ? env.falImageVideoModel : env.falVideoModel;
     const aspectRatio = ['9:16', '1:1'].includes(options.aspectRatio) ? options.aspectRatio : '16:9';
-    const result = await fal.subscribe(env.falVideoModel, {
+    const input = {
+      prompt: clean(prompt),
+      resolution: env.falVideoResolution,
+      aspect_ratio: hasSourceImage ? 'auto' : aspectRatio,
+      enable_safety_checker: true,
+      enable_output_safety_checker: true,
+      enable_prompt_expansion: true,
+      acceleration: 'regular',
+      video_quality: 'high',
+      video_write_mode: 'fast',
+    };
+    if (hasSourceImage) input.image_url = localImageDataUrl(options.imageUrl);
+    const result = await fal.subscribe(model, {
       input: {
-        prompt: clean(prompt),
-        resolution: env.falVideoResolution,
-        aspect_ratio: aspectRatio,
-        enable_safety_checker: true,
-        enable_output_safety_checker: true,
-        // Fal's expansion step also normalizes multilingual prompts for the
-        // video model. This is important for short Arabic product requests.
-        enable_prompt_expansion: true,
-        acceleration: 'regular',
-        video_quality: 'high',
-        video_write_mode: 'fast',
+        ...input,
       },
       pollInterval: 1000,
       timeout: env.agentTimeoutMs,
@@ -107,7 +121,7 @@ export async function generateVideo(prompt, options = {}) {
     const data = result?.data || result;
     const url = data?.video?.url || data?.video_url || data?.url;
     if (!url) throw Object.assign(new Error('fal_video_output_missing'), { status: 502 });
-    return { url, provider: 'fal-wan-turbo', model: env.falVideoModel };
+    return { url, provider: hasSourceImage ? 'fal-wan-image-video' : 'fal-wan-turbo', model };
   }
 
   if (env.videoApiUrl && env.videoApiKey) {

@@ -39,6 +39,7 @@ export const env = Object.freeze({
   elevenLabsModel: process.env.ELEVENLABS_MODEL || 'eleven_multilingual_v2',
   falKey,
   falVideoModel: process.env.FAL_VIDEO_MODEL || 'fal-ai/wan/v2.2-a14b/text-to-video/turbo',
+  falImageVideoModel: process.env.FAL_IMAGE_VIDEO_MODEL || 'fal-ai/wan/v2.2-a14b/image-to-video/turbo',
   falVideoResolution: ['480p', '580p', '720p'].includes(process.env.FAL_VIDEO_RESOLUTION) ? process.env.FAL_VIDEO_RESOLUTION : '720p',
   videoApiUrl: process.env.VIDEO_API_URL || '',
   videoApiKey: process.env.VIDEO_API_KEY || '',

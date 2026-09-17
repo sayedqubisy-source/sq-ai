@@ -103,6 +103,19 @@ for (const provider of ['free', 'custom', 'fal']) test(`production routes (${pro
     assert.equal((await request(result.video_url)).status, 401);
   });
 
+  if (provider === 'fal') await t.test('image-to-video preserves an uploaded source through the Fal image endpoint', async () => {
+    database.prepare('UPDATE users SET credits=2 WHERE id=?').run(user.id);
+    const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]).toString('base64');
+    const response = await post('/api/tools/generate', { tool: 'image-video', prompt: 'Slow product camera orbit', imageDataUrl: `data:image/png;base64,${png}` }, cookie);
+    assert.equal(response.status, 202); const job = await response.json();
+    let result;
+    for (let i = 0; i < 40; i++) { result = await (await request(`/api/tools/video-job/${job.job_id}`, { headers: { cookie } })).json(); if (result.status !== 'running') break; await wait(25); }
+    assert.equal(result.status, 'completed', JSON.stringify(result));
+    assert.equal(result.provider, 'fal-wan-image-video');
+    assert.equal(result.video_url, 'https://video.test/fal-image-output.mp4');
+    assert.equal(database.prepare('SELECT source_image_url FROM video_jobs WHERE id=?').get(job.job_id).source_image_url.includes('/generated-media/video-source-'), true);
+  });
+
   if (!paid) await t.test('provider error fails the video job and refunds its reserved credit', async () => {
     database.prepare('UPDATE users SET credits=1 WHERE id=?').run(user.id);
     const response = await post('/api/tools/generate', { tool: 'text-video', prompt: 'test provider failure', platform: 'square' }, cookie);

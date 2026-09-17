@@ -7,6 +7,7 @@ import { generateText } from '../ai/runtime.mjs';
 import { generateImage, generateVideo } from '../agent/service.mjs';
 import { freeVideo } from '../video-fix.mjs';
 import { generateMusic } from '../media/music.mjs';
+import { removeFile, saveBuffer } from '../media/store.mjs';
 import { enhanceMediaPrompt, mediaToolGroups } from '../prompts/media.mjs';
 
 const router = express.Router();
@@ -15,13 +16,27 @@ const aliases = Object.freeze({ video_script: 'script-video', ad_video: 'ad-vide
 const clean = (value, max) => String(value ?? '').trim().slice(0, max);
 const normalizeTool = value => aliases[clean(value, 100).toLowerCase()] || clean(value, 100).toLowerCase();
 
-function createVideoJob(userId, tool, prompt, language, platform) {
+const MAX_INPUT_IMAGE_BYTES = 8 * 1024 * 1024;
+
+function storeInputImage(dataUrl) {
+  const match = /^data:image\/(png|jpe?g|webp);base64,([A-Za-z0-9+/=\r\n]+)$/i.exec(String(dataUrl || ''));
+  if (!match) throw Object.assign(new Error('invalid_source_image'), { status: 400 });
+  const bytes = Buffer.from(match[2].replace(/\s/g, ''), 'base64');
+  if (!bytes.length || bytes.length > MAX_INPUT_IMAGE_BYTES) throw Object.assign(new Error('source_image_too_large'), { status: 413 });
+  const png = bytes.length > 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  const jpeg = bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  const webp = bytes.length > 12 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP';
+  if (!png && !jpeg && !webp) throw Object.assign(new Error('invalid_source_image'), { status: 400 });
+  return saveBuffer('video-source', png ? 'png' : webp ? 'webp' : 'jpg', bytes);
+}
+
+function createVideoJob(userId, tool, prompt, language, platform, sourceImageUrl = null) {
   const id = crypto.randomUUID();
   return db.transaction(() => {
     const reserved = db.prepare('UPDATE users SET credits=credits-1 WHERE id=? AND credits>0').run(userId);
     if (!reserved.changes) return null;
-    db.prepare(`INSERT INTO video_jobs(id,user_id,tool,prompt,language,platform,status,provider,credits_reserved,started_at)
-      VALUES(?,?,?,?,?,?,'running',?,1,CURRENT_TIMESTAMP)`).run(id, userId, tool, prompt, language, platform, env.paidVideoEnabled ? 'paid-video' : 'huggingface-zero-gpu');
+    db.prepare(`INSERT INTO video_jobs(id,user_id,tool,prompt,language,platform,source_image_url,status,provider,credits_reserved,started_at)
+      VALUES(?,?,?,?,?,?,?,'running',?,1,CURRENT_TIMESTAMP)`).run(id, userId, tool, prompt, language, platform, sourceImageUrl, env.paidVideoEnabled ? 'paid-video' : 'huggingface-zero-gpu');
     return id;
   })();
 }
@@ -54,7 +69,7 @@ async function runVideoJob(id) {
   try {
     if (env.paidVideoEnabled) {
       const aspectRatio = /vertical|tiktok|reels|shorts|9:16/i.test(job.platform) ? '9:16' : '16:9';
-      const result = await generateVideo(job.prompt, { aspectRatio, resolution: '720p' });
+      const result = await generateVideo(job.prompt, { aspectRatio, resolution: '720p', imageUrl: job.source_image_url });
       return completeVideoJob(id, result.url, result.provider);
     }
     const response = await freeVideo({ prompt: job.prompt, platform: job.platform, tool: job.tool });
@@ -65,6 +80,8 @@ async function runVideoJob(id) {
   } catch (error) {
     console.error('sqai_video_job_failed', { id, error: error?.message || String(error) });
     failVideoJob(id, error);
+  } finally {
+    if (job.source_image_url) removeFile(job.source_image_url);
   }
 }
 
@@ -77,8 +94,19 @@ router.post('/generate', async (req, res, next) => {
   const enhancedPrompt = enhanceMediaPrompt(tool, prompt, req.body);
 
   if (VIDEO_TOOLS.has(tool)) {
-    const id = createVideoJob(req.user.id, tool, enhancedPrompt, clean(req.body?.language, 50), clean(req.body?.platform || req.body?.aspectRatio, 50));
-    if (!id) return res.status(402).json({ error: 'credits_exhausted' });
+    let sourceImageUrl = null;
+    if (tool === 'image-video') sourceImageUrl = storeInputImage(req.body?.imageDataUrl);
+    let id;
+    try {
+      id = createVideoJob(req.user.id, tool, enhancedPrompt, clean(req.body?.language, 50), clean(req.body?.platform || req.body?.aspectRatio, 50), sourceImageUrl);
+    } catch (error) {
+      if (sourceImageUrl) removeFile(sourceImageUrl);
+      throw error;
+    }
+    if (!id) {
+      if (sourceImageUrl) removeFile(sourceImageUrl);
+      return res.status(402).json({ error: 'credits_exhausted' });
+    }
     setImmediate(() => runVideoJob(id));
     return res.status(202).json({ async: true, job_id: id, status: 'running', provider: env.paidVideoEnabled ? 'paid-video' : 'huggingface-zero-gpu', free: !env.paidVideoEnabled, credits_reserved: 1 });
   }
@@ -114,8 +142,11 @@ router.get('/video-job/:id', (req, res) => {
 });
 
 export function recoverVideoJobs() {
-  const jobs = db.prepare("SELECT id FROM video_jobs WHERE status='running'").all();
-  for (const job of jobs) failVideoJob(job.id, 'video_job_interrupted_by_restart');
+  const jobs = db.prepare("SELECT id,source_image_url FROM video_jobs WHERE status='running'").all();
+  for (const job of jobs) {
+    if (job.source_image_url) removeFile(job.source_image_url);
+    failVideoJob(job.id, 'video_job_interrupted_by_restart');
+  }
 }
 
 export function cleanupVideoJobs() {
