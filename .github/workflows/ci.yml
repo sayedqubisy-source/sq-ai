@@ -18,12 +18,14 @@ jobs:
         with:
           node-version: 22
       - name: Install dependencies
-        run: npm install --omit=dev
+        run: npm ci --omit=dev
       - name: Syntax check
         shell: bash
         run: |
           set -euo pipefail
           while IFS= read -r -d '' file; do node --check "$file"; done < <(find . -maxdepth 2 -type f \( -name '*.js' -o -name '*.mjs' \) ! -path './node_modules/*' -print0)
+      - name: Regression tests
+        run: npm test
       - name: Production smoke test
         run: node scripts/smoke.mjs
       - name: Build production Docker image

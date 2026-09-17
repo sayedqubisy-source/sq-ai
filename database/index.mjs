@@ -51,14 +51,29 @@ db.exec(`
   );
 `);
 
-// Safe compatibility migrations for databases created by earlier SQ AI versions.
-for (const sql of [
-  "ALTER TABLE api_keys ADD COLUMN key_hash TEXT",
-  "ALTER TABLE api_keys ADD COLUMN key_prefix TEXT DEFAULT ''",
-  "ALTER TABLE projects ADD COLUMN updated_at TEXT DEFAULT CURRENT_TIMESTAMP",
-]) {
-  try { db.exec(sql); } catch {}
+// SQLite cannot add a non-constant timestamp default to a populated table.
+// Inspect the schema instead of hiding migration failures.
+function addColumn(table, name, definition) {
+  if (!db.prepare(`PRAGMA table_info(${table})`).all().some(column => column.name === name)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+  }
 }
+db.transaction(() => {
+  addColumn('api_keys', 'key_hash', 'TEXT');
+  addColumn('api_keys', 'key_prefix', "TEXT DEFAULT ''");
+  addColumn('projects', 'updated_at', 'TEXT');
+  addColumn('users', 'paddle_subscription_id', 'TEXT');
+  addColumn('users', 'billing_status', "TEXT DEFAULT 'inactive'");
+  db.exec(`
+    UPDATE projects SET updated_at = COALESCE(created_at, CURRENT_TIMESTAMP) WHERE updated_at IS NULL;
+    CREATE TRIGGER IF NOT EXISTS projects_timestamp_after_insert
+      AFTER INSERT ON projects WHEN NEW.updated_at IS NULL
+      BEGIN UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id; END;
+    CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_usage_user_id ON usage(user_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+  `);
+})();
 
 export function closeDatabase() {
   if (db.open) db.close();

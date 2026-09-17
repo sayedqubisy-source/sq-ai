@@ -5,7 +5,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg ca-certificates && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm ci --omit=dev
 
 COPY . .
 RUN mkdir -p /app/data && chown -R node:node /app

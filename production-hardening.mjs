@@ -22,8 +22,7 @@ if (!express.application.__sqaiProductionHardening) {
     if (!req.path.startsWith('/api/')) return next();
     const rule = limits.find(item => req.path === item.prefix || req.path.startsWith(item.prefix));
     if (!rule) return next();
-    const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-    const key = `${rule.prefix}:${forwarded || req.socket.remoteAddress || 'unknown'}`;
+    const key = `${rule.prefix}:${req.ip || req.socket.remoteAddress || 'unknown'}`;
     const now = Date.now();
     const bucket = buckets.get(key);
     if (!bucket || now - bucket.startedAt >= rule.windowMs) {

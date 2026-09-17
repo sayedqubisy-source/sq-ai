@@ -6,7 +6,8 @@ async function request(url, options = {}, timeoutMs = env.requestTimeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    return await readJson(response);
   } catch (error) {
     if (error?.name === 'AbortError') throw Object.assign(new Error('provider_timeout'), { status: 504 });
     throw error;
@@ -37,24 +38,22 @@ async function gemini(messages, model = env.geminiTextModel) {
   const { system, contents } = messagesToGemini(messages);
   const body = { contents, generationConfig: { temperature: 0.7 } };
   if (system) body.systemInstruction = { parts: [{ text: system }] };
-  const response = await request(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+  const data = await request(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.geminiKey },
     body: JSON.stringify(body),
   });
-  const data = await readJson(response);
   const text = data?.candidates?.[0]?.content?.parts?.map(p => p?.text || '').join('').trim();
   if (!text) throw Object.assign(new Error('ai_empty_result'), { status: 502 });
   return { text, provider: 'google-gemini', model };
 }
 
 async function openAiCompatible(baseUrl, key, model, messages, provider) {
-  const response = await request(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+  const data = await request(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, messages, temperature: 0.7 }),
   });
-  const data = await readJson(response);
   const text = data?.choices?.[0]?.message?.content?.trim();
   if (!text) throw Object.assign(new Error('ai_empty_result'), { status: 502 });
   return { text, provider, model };
@@ -92,6 +91,6 @@ export function runtimeStatus() {
       openrouter: Boolean(process.env.OPENROUTER_API_KEY),
       groq: Boolean(process.env.GROQ_API_KEY),
     },
-    default_provider: env.geminiKey ? 'google-gemini' : process.env.OPENAI_API_KEY ? 'openai' : null,
+    default_provider: env.geminiKey ? 'google-gemini' : process.env.OPENAI_API_KEY ? 'openai' : process.env.OPENROUTER_API_KEY ? 'openrouter' : process.env.GROQ_API_KEY ? 'groq' : null,
   };
 }

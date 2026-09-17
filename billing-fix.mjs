@@ -1,8 +1,6 @@
 import express from 'express';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-import Database from 'better-sqlite3';
+import { db as billingDb } from './database/index.mjs';
 
 const originalJson = express.json;
 express.json = function patchedJson(options = {}) {
@@ -18,13 +16,6 @@ express.json = function patchedJson(options = {}) {
 
 const appPrototype = express.application;
 const originalPost = appPrototype.post;
-const originalListen = appPrototype.listen;
-const dbPath = process.env.DB_PATH || './data/sq-ai.sqlite';
-fs.mkdirSync(path.dirname(path.resolve(dbPath)), { recursive:true });
-const billingDb = new Database(dbPath);
-billingDb.pragma('journal_mode=WAL');
-billingDb.pragma('busy_timeout=5000');
-billingDb.pragma('synchronous=NORMAL');
 billingDb.exec(`
   CREATE TABLE IF NOT EXISTS billing_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,7 +26,6 @@ billingDb.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_billing_events_transaction ON billing_events(transaction_id);
 `);
-for (const statement of ["ALTER TABLE users ADD COLUMN paddle_subscription_id TEXT","ALTER TABLE users ADD COLUMN billing_status TEXT DEFAULT 'inactive'"]) { try { billingDb.exec(statement); } catch {} }
 
 const normalizePlan = value => { const plan=String(value||'').trim().toLowerCase(); if(plan==='pro')return 'growth'; if(plan==='business')return 'scale'; return plan; };
 const planForPrice = priceId => { if(!priceId)return null; const entries=[[process.env.PADDLE_PRICE_STARTER,'starter'],[process.env.PADDLE_PRICE_GROWTH,'growth'],[process.env.PADDLE_PRICE_SCALE,'scale']].filter(([id])=>id); return entries.find(([id])=>id===priceId)?.[1]||null; };
@@ -98,4 +88,6 @@ async function paddleWebhook(req,res){
   }catch(error){console.error('paddle_webhook_processing_failed',error?.message||error);return res.status(500).send('webhook_processing_failed');}
 }
 appPrototype.post=function patchedPost(route,...handlers){if(route==='/api/billing/checkout'&&handlers.length)return originalPost.call(this,route,...handlers.slice(0,-1),createCheckout);return originalPost.call(this,route,...handlers);};
-appPrototype.listen=function patchedListen(...args){const app=this;if(!app.__sqaiPaddleWebhookRegistered){app.__sqaiPaddleWebhookRegistered=true;const raw=express.raw({type:'application/json',limit:'256kb'});originalPost.call(app,'/api/webhooks/paddle',raw,paddleWebhook);}return originalListen.apply(this,args);};
+export function registerBillingWebhook(app) {
+  app.post('/api/webhooks/paddle', express.raw({ type: 'application/json', limit: '256kb' }), paddleWebhook);
+}
