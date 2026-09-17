@@ -12,12 +12,13 @@ const execFileAsync = promisify(execFile);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const clean = (value, max = 12000) => String(value ?? '').trim().slice(0, max);
 
-function localImageDataUrl(publicUrl) {
+async function uploadImageToFal(fal, publicUrl) {
   const file = localPath(publicUrl);
   if (!file) return clean(publicUrl, 12 * 1024 * 1024);
   const extension = path.extname(file).toLowerCase();
   const mime = extension === '.png' ? 'image/png' : extension === '.webp' ? 'image/webp' : 'image/jpeg';
-  return `data:${mime};base64,${fs.readFileSync(file).toString('base64')}`;
+  const blob = new Blob([fs.readFileSync(file)], { type: mime });
+  return fal.storage.upload(blob);
 }
 
 async function request(url, options = {}, timeoutMs = env.agentTimeoutMs) {
@@ -110,7 +111,9 @@ export async function generateVideo(prompt, options = {}) {
       video_quality: 'high',
       video_write_mode: 'fast',
     };
-    if (hasSourceImage) input.image_url = localImageDataUrl(options.imageUrl);
+    // Upload the image once and submit a compact CDN URL to the queue. Large
+    // base64 request bodies can time out behind application reverse proxies.
+    if (hasSourceImage) input.image_url = await uploadImageToFal(fal, options.imageUrl);
     const result = await fal.subscribe(model, {
       input: {
         ...input,
