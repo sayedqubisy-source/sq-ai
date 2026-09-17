@@ -88,6 +88,23 @@ for (const paid of [false, true]) test(`production routes (${paid ? 'paid' : 'fr
     assert.equal((await request(result.video_url)).status, 401);
   });
 
+  if (!paid) await t.test('provider error fails the video job and refunds its reserved credit', async () => {
+    database.prepare('UPDATE users SET credits=1 WHERE id=?').run(user.id);
+    const response = await post('/api/tools/generate', { tool: 'text-video', prompt: 'test provider failure', platform: 'square' }, cookie);
+    assert.equal(response.status, 202);
+    const job = await response.json();
+    let result;
+    for (let i = 0; i < 40; i++) {
+      result = await (await request(`/api/tools/video-job/${job.job_id}`, { headers: { cookie } })).json();
+      if (result.status !== 'running') break;
+      await wait(25);
+    }
+    assert.equal(result.status, 'failed');
+    assert.match(result.error, /GPU quota exceeded/);
+    assert.equal(result.credits_remaining, 1);
+    assert.equal(database.prepare('SELECT credits FROM users WHERE id=?').get(user.id).credits, 1);
+  });
+
   await t.test('forged forwarded headers cannot bypass authentication rate limits', async () => {
     let limited = 0;
     for (let i = 0; i < 14; i++) {

@@ -2,16 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { env } from './config/env.mjs';
+import { videoInputs, readVideoEvents } from './media/gradio-video.mjs';
 
 const previousFetch = globalThis.fetch;
-const DEFAULT_NEGATIVE_PROMPT = 'nsfw, nudity, explicit content, watermark, text, signature, subtitles, low quality, blurry, deformed, disfigured, static frame';
-
-function platformDimensions(platform) {
-  const p = String(platform || '').toLowerCase();
-  if (/youtube|facebook|linkedin|website|landscape/.test(p)) return { width:832, height:480 };
-  if (/square|instagram-square/.test(p)) return { width:640, height:640 };
-  return { width:480, height:832 };
-}
 function generatedVideoDir() {
   const dbPath=process.env.DB_PATH || './data/sq-ai.sqlite';
   const dir=path.join(path.dirname(path.resolve(dbPath)),'generated-videos');
@@ -72,18 +65,15 @@ export async function freeVideo(payload){
   const space=process.env.FREE_VIDEO_SPACE || 'alexcheng0072/wan27-free-video-generator';
   const configuredBase=String(process.env.FREE_VIDEO_SPACE_URL || '').trim().replace(/\/$/,'');
   const base=configuredBase || `https://${space.replace(/\/$/,'').replace('/', '-').toLowerCase()}.hf.space`;
-  const {width,height}=platformDimensions(payload.platform);
-  const prompt=String(payload.prompt || '').trim().slice(0,600);
-  const duration=Math.min(5,Math.max(2,Number(process.env.FREE_VIDEO_DURATION_SECONDS || 3)));
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),600000);
   const headers={'Content-Type':'application/json',Accept:'application/json',...authHeaders()};
 
   try{
-    const dataPayload=[null,prompt,height,width,DEFAULT_NEGATIVE_PROMPT,duration,0,4,42,true];
+    const dataPayload=videoInputs(payload.prompt, payload.platform, process.env.FREE_VIDEO_DURATION_SECONDS || 3);
     const submit=await requestWithRetry(`${base}/gradio_api/call/generate_video`,{
       method:'POST',headers,body:JSON.stringify({data:dataPayload})
-    },controller,5);
+    },controller,1);
     const raw=await submit.text();
     let data={};try{data=JSON.parse(raw);}catch{}
     if(!submit.ok){
@@ -100,19 +90,7 @@ export async function freeVideo(payload){
     }
 
     const stream=await result.text();
-    let finalData=null,streamError='';
-    for(const line of stream.split(/\r?\n/)){
-      if(!line.startsWith('data:'))continue;
-      const value=line.slice(5).trim();
-      if(!value || value==='[DONE]')continue;
-      try{
-        const parsed=JSON.parse(value);
-        if(parsed?.error)streamError=String(parsed.error);
-        if(Array.isArray(parsed))finalData=parsed;
-        else if(parsed?.data!==undefined)finalData=parsed.data;
-      }catch{}
-    }
-    if(streamError)throw new Error(streamError);
+    const finalData=readVideoEvents(stream);
     const file=findFile(finalData);
     if(!file)throw new Error('Free video service finished without a video file.');
 
