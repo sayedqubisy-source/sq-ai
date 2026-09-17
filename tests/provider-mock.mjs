@@ -8,7 +8,7 @@ globalThis.fetch = async (input, init = {}) => {
   const falQueue = 'https://queue.fal.run/fal-ai/wan';
   if (url === falBase) {
     const body = JSON.parse(init.body);
-    if (body.resolution !== '720p' || !['16:9', '9:16', '1:1'].includes(body.aspect_ratio)) throw new Error('Invalid fal Wan Turbo contract');
+    if (body.resolution !== '720p' || !['16:9', '9:16', '1:1'].includes(body.aspect_ratio) || body.enable_prompt_expansion !== true) throw new Error('Invalid fal Wan Turbo contract');
     return Response.json({ request_id: 'fal-event', status: 'IN_QUEUE' });
   }
   if (url.startsWith(`${falQueue}/requests/fal-event/status`)) return Response.json({ status: 'COMPLETED', logs: [] });
