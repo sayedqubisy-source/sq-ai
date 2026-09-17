@@ -12,6 +12,18 @@ globalThis.fetch = async (input, init = {}) => {
     }
     return Response.json({ choices: [{ message: { content: 'Generated content' } }] });
   }
+  const musicBase = 'https://facebook-musicgen.hf.space';
+  if (url === `${musicBase}/gradio_api/call/predict_batched`) {
+    const { data } = JSON.parse(init.body);
+    if (!Array.isArray(data) || !Array.isArray(data[0]) || typeof data[0][0] !== 'string') throw new Error('Invalid MusicGen contract');
+    return Response.json({ event_id: 'music-event' });
+  }
+  if (url === `${musicBase}/gradio_api/call/predict_batched/music-event`) {
+    return new Response('event: complete\ndata: [{"path":"/tmp/test.wav"}]\n\n');
+  }
+  if (url === `${musicBase}/gradio_api/file=/tmp/test.wav`) {
+    return new Response(new Uint8Array([82, 73, 70, 70, 4, 0, 0, 0, 87, 65, 86, 69]), { headers: { 'content-type': 'audio/wav' } });
+  }
   const base = 'https://alexcheng0072-wan27-free-video-generator.hf.space';
   if (url === `${base}/gradio_api/call/generate_video`) {
     const { data } = JSON.parse(init.body);

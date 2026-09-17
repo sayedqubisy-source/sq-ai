@@ -608,6 +608,16 @@
       display: none;
     }
 
+    .sidebar-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 35;
+      border: 0;
+      background: rgba(0, 0, 0, .55);
+      backdrop-filter: blur(2px);
+    }
+
     .topbar-title {
       font-size: 15px;
       font-weight: 700;
@@ -1271,6 +1281,14 @@
         left: 0;
       }
 
+      body.sidebar-open {
+        overflow: hidden;
+      }
+
+      body.sidebar-open .sidebar-backdrop {
+        display: block;
+      }
+
       .mobile-menu {
         display: inline-grid;
         place-items: center;
@@ -1339,6 +1357,9 @@
       }
     }
   </style>
+<script defer src="/ui-theme.js?v=sqai-light-20260914"></script>
+  <script defer src="/app-fixes.js?v=sqai-app-20260914"></script>
+  <script defer src="/sq-ai-runtime.js?v=sqai-runtime-20260914"></script>
 </head>
 
 <body>
@@ -1481,7 +1502,14 @@
 
     <footer class="landing-footer">
       © 2026 SQ AI. All rights reserved.
-    </footer>
+
+    <div class="sqai-legal-links" style="margin-top:18px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;font-size:13px;opacity:.8">
+      <a href="/terms.html" rel="nofollow">Terms of Service</a>
+      <a href="/privacy.html" rel="nofollow">Privacy Notice</a>
+      <a href="/refund.html" rel="nofollow">Refund Policy</a>
+      <a id="sqai-tools-hub-link" href="/tools.html" style="display:inline-flex;align-items:center;gap:7px;border:1px solid rgba(124,92,255,.28);background:rgba(124,92,255,.10);padding:8px 12px;border-radius:10px;color:#d8d1ff;font-size:12px;font-weight:700">✦ Tools Hub</a>
+    </div>
+  </footer>
 
   </section>
 
@@ -1549,7 +1577,7 @@
             type="password"
             autocomplete="current-password"
             placeholder="••••••••"
-            minlength="6"
+            minlength="8"
             required />
         </div>
 
@@ -1705,6 +1733,8 @@
     </aside>
 
 
+    <button class="sidebar-backdrop" aria-label="Close navigation" onclick="closeMobileSidebar()"></button>
+
     <main class="main">
 
       <header class="topbar">
@@ -1713,6 +1743,7 @@
 
           <button
             class="icon-btn mobile-menu"
+            aria-label="Open navigation"
             onclick="toggleSidebar()">
             ☰
           </button>
@@ -3334,10 +3365,10 @@
 
 
     function toggleSidebar() {
-
-      document
-        .getElementById("sidebar")
-        .classList.toggle("open");
+      const sidebar = document.getElementById("sidebar");
+      const open = !sidebar.classList.contains("open");
+      sidebar.classList.toggle("open", open);
+      document.body.classList.toggle("sidebar-open", open);
 
     }
 
@@ -3347,6 +3378,8 @@
       document
         .getElementById("sidebar")
         .classList.remove("open");
+
+      document.body.classList.remove("sidebar-open");
 
     }
 

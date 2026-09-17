@@ -5,19 +5,7 @@ import path from 'node:path';
 
 const port = 3187;
 const dbPath = path.join(os.tmpdir(), `sq-ai-smoke-${process.pid}.sqlite`);
-const child = spawn(process.execPath, [
-  '--import', './production-hardening.mjs',
-  '--import', './auto-recovery.mjs',
-  '--import', './billing-fix.mjs',
-  '--import', './ui-fix.mjs',
-  '--import', './creative-prompt-engine.mjs',
-  '--import', './video-fix.mjs',
-  '--import', './video-gemini-fix.mjs',
-  '--import', './video-jobs-fix.mjs',
-  '--import', './universal-media-fix.mjs',
-  '--import', './media-assets-fix.mjs',
-  'server.js',
-], {
+const child = spawn(process.execPath, ['server.js'], {
   env: {
     ...process.env,
     NODE_ENV: 'test',
@@ -33,7 +21,6 @@ const child = spawn(process.execPath, [
     VIDEO_API_KEY: '',
     PADDLE_API_KEY: '',
     PADDLE_WEBHOOK_SECRET: '',
-    SQ_AI_VIDEO_BRIDGE_SECRET: '',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -59,7 +46,7 @@ try {
   await waitForHealth();
   const healthResponse = await get('/api/health');
   const health = await healthResponse.json();
-  assert(health.ok === true && health.version === '5.1.0' && health.database === 'ok', 'health endpoint failed');
+  assert(health.ok === true && health.version === '5.2.0' && health.database === 'ok', 'health endpoint failed');
   assert(healthResponse.headers.get('x-request-id'), 'production request ID hardening missing');
   assert(healthResponse.headers.get('permissions-policy') === 'camera=(), microphone=(), geolocation=()', 'production security headers missing');
 
@@ -69,7 +56,7 @@ try {
   assert(plans.starter?.credits === 100 && plans.growth?.credits === 500 && plans.scale?.credits === 2000, 'plans endpoint failed');
 
   const bridgeAttempt = await get('/api/v1/videos', { method: 'POST', headers: { authorization: 'Bearer free-local-video', 'content-type': 'application/json' }, body: JSON.stringify({ prompt: 'smoke' }) });
-  assert(bridgeAttempt.status === 401, 'legacy public video bridge token is still accepted');
+  assert(bridgeAttempt.status === 404, 'legacy public video bridge route is still exposed');
 
   const email = `smoke-${Date.now()}@example.com`;
   const signup = await get('/api/auth/signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password: 'SmokeTest123!', name: 'Smoke' }) });

@@ -22,7 +22,7 @@ for (const paid of [false, true]) test(`production routes (${paid ? 'paid' : 'fr
       GEMINI_API_KEY: '', OPENAI_API_KEY: '', GROQ_API_KEY: '', OPENROUTER_API_KEY: 'test-only',
       PADDLE_API_KEY: '', PADDLE_WEBHOOK_SECRET: 'test-webhook-secret', PADDLE_PRICE_GROWTH: 'pri_growth',
       PAID_VIDEO_ENABLED: String(paid), FREE_VIDEO_SPACE: 'alexcheng0072/wan27-free-video-generator', FREE_VIDEO_SPACE_URL: '',
-      VIDEO_API_URL: paid ? 'https://video.test/generate' : '', VIDEO_API_KEY: paid ? 'test-only' : '', HF_TOKEN: '', SQ_AI_VIDEO_BRIDGE_SECRET: 'test-only-bridge' },
+      VIDEO_API_URL: paid ? 'https://video.test/generate' : '', VIDEO_API_KEY: paid ? 'test-only' : '', HF_TOKEN: '' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let logs = ''; let database;
@@ -35,9 +35,15 @@ for (const paid of [false, true]) test(`production routes (${paid ? 'paid' : 'fr
   let ready = false;
   for (let i = 0; i < 80; i++) { try { if ((await request('/api/health')).ok) { ready = true; break; } } catch {} await wait(50); }
   assert.ok(ready, logs);
+  const healthResponse = await request('/api/health');
+  assert.ok(healthResponse.headers.get('content-security-policy')?.includes("default-src 'self'"));
+  assert.equal(healthResponse.headers.get('cache-control'), 'no-store');
+  assert.equal(healthResponse.headers.get('x-content-type-options'), 'nosniff');
+  assert.ok(Number(healthResponse.headers.get('x-ratelimit-remaining')) >= 0);
   database = new Database(dbPath);
   const post = (url, body, cookie, headers = {}) => request(url, { method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}), ...headers }, body: JSON.stringify(body) });
   const account = { email: 'integration@example.com', password: 'IntegrationPassword123' };
+  assert.equal((await post('/api/auth/signup', { email: 'long@example.com', password: 'x'.repeat(1025) })).status, 400);
   const signups = await Promise.all([post('/api/auth/signup', account), post('/api/auth/signup', account)]);
   assert.deepEqual(signups.map(r => r.status).sort(), [201, 409]);
   const signup = signups.find(r => r.status === 201);
@@ -56,6 +62,12 @@ for (const paid of [false, true]) test(`production routes (${paid ? 'paid' : 'fr
     database.prepare('UPDATE users SET credits=499 WHERE id=?').run(user.id);
     assert.equal((await post('/api/webhooks/paddle', event, null, { 'paddle-signature': signature })).status, 200);
     assert.equal(database.prepare('SELECT credits FROM users WHERE id=?').get(user.id).credits, 499);
+
+    const missingUserEvent = { ...event, event_id: 'evt_missing_user', data: { ...event.data, id: 'txn_missing_user', custom_data: { ...event.data.custom_data, sq_ai_user_id: '9999999' } } };
+    const missingRaw = JSON.stringify(missingUserEvent); const missingTs = Math.floor(Date.now() / 1000);
+    const missingSignature = `ts=${missingTs};h1=${crypto.createHmac('sha256', 'test-webhook-secret').update(`${missingTs}:${missingRaw}`).digest('hex')}`;
+    assert.equal((await post('/api/webhooks/paddle', missingUserEvent, null, { 'paddle-signature': missingSignature })).status, 500);
+    assert.equal(database.prepare('SELECT id FROM billing_events WHERE event_id=?').get('evt_missing_user'), undefined);
   });
 
   await t.test('concurrent generation cannot overspend and failures refund usage', async () => {
@@ -103,6 +115,17 @@ for (const paid of [false, true]) test(`production routes (${paid ? 'paid' : 'fr
     assert.match(result.error, /GPU quota exceeded/);
     assert.equal(result.credits_remaining, 1);
     assert.equal(database.prepare('SELECT credits FROM users WHERE id=?').get(user.id).credits, 1);
+  });
+
+  await t.test('music generation returns protected audio and records one credit', async () => {
+    database.prepare('UPDATE users SET credits=2 WHERE id=?').run(user.id);
+    const response = await post('/api/tools/generate', { tool: 'music', prompt: 'cinematic piano' }, cookie);
+    assert.equal(response.status, 200); const result = await response.json();
+    assert.match(result.audio_url, /^\/generated-media\/music-.*\.wav$/);
+    assert.equal(result.credits_remaining, 1);
+    const audio = await request(result.audio_url, { headers: { cookie } });
+    assert.equal(audio.status, 200); assert.match(audio.headers.get('content-type'), /^audio\/wav/);
+    assert.equal((await request(result.audio_url)).status, 401);
   });
 
   await t.test('forged forwarded headers cannot bypass authentication rate limits', async () => {
