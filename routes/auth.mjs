@@ -13,6 +13,7 @@ router.post('/auth/signup', async (req, res) => {
   const name = clean(req.body?.name, 100);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'valid_email_required' });
   if (password.length < 8) return res.status(400).json({ error: 'password_min_8_characters' });
+  if (password.length > 1024) return res.status(400).json({ error: 'password_too_long' });
   if (db.prepare('SELECT id FROM users WHERE email = ?').get(email)) return res.status(409).json({ error: 'email_already_registered' });
 
   const passwordHash = await hashPassword(password);
@@ -26,6 +27,7 @@ router.post('/auth/signup', async (req, res) => {
 router.post('/auth/login', async (req, res) => {
   const email = clean(req.body?.email, 200).toLowerCase();
   const password = String(req.body?.password || '');
+  if (password.length > 1024) return res.status(400).json({ error: 'password_too_long' });
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
   if (!user || !(await verifyPassword(password, user.password_hash))) return res.status(401).json({ error: 'invalid_email_or_password' });
   createSession(user.id, res);

@@ -8,6 +8,7 @@ export const db = new Database(env.dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('busy_timeout = 5000');
 db.pragma('foreign_keys = ON');
+db.pragma('synchronous = NORMAL');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -49,6 +50,26 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+  CREATE TABLE IF NOT EXISTS video_jobs (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    tool TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    language TEXT NOT NULL DEFAULT '',
+    platform TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'running',
+    provider TEXT NOT NULL DEFAULT 'huggingface-zero-gpu',
+    video_url TEXT,
+    error TEXT,
+    credits_reserved INTEGER NOT NULL DEFAULT 0,
+    credits_remaining INTEGER,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TEXT,
+    completed_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_video_jobs_user_created ON video_jobs(user_id, created_at DESC);
 `);
 
 // SQLite cannot add a non-constant timestamp default to a populated table.

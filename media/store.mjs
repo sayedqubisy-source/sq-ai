@@ -9,8 +9,12 @@ fs.mkdirSync(mediaRoot, { recursive: true });
 fs.mkdirSync(videoRoot, { recursive: true });
 
 export function saveBuffer(prefix, extension, value, directory = mediaRoot) {
+  const bytes = Buffer.from(value);
+  if (!bytes.length || bytes.length > env.maxMediaBytes) {
+    throw Object.assign(new Error('media_output_invalid_size'), { status: 502 });
+  }
   const name = `${prefix}-${Date.now()}-${crypto.randomBytes(6).toString('hex')}.${extension}`;
-  fs.writeFileSync(path.join(directory, name), Buffer.from(value));
+  fs.writeFileSync(path.join(directory, name), bytes);
   return `/${directory === videoRoot ? 'generated-videos' : 'generated-media'}/${name}`;
 }
 

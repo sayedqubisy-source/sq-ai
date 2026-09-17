@@ -2,20 +2,6 @@ import express from 'express';
 import crypto from 'node:crypto';
 import { db as billingDb } from './database/index.mjs';
 
-const originalJson = express.json;
-express.json = function patchedJson(options = {}) {
-  const verify = options.verify;
-  return originalJson({
-    ...options,
-    verify(req, res, buf, encoding) {
-      req.rawBody = Buffer.from(buf);
-      if (typeof verify === 'function') verify(req, res, buf, encoding);
-    }
-  });
-};
-
-const appPrototype = express.application;
-const originalPost = appPrototype.post;
 billingDb.exec(`
   CREATE TABLE IF NOT EXISTS billing_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +18,13 @@ const planForPrice = priceId => { if(!priceId)return null; const entries=[[proce
 const creditsForPlan={starter:100,growth:500,scale:2000};
 function paddleApiBase(){return String(process.env.PADDLE_ENVIRONMENT||'production').toLowerCase()==='sandbox'?'https://sandbox-api.paddle.com':'https://api.paddle.com';}
 
+async function paddleRequest(url, options) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try { return await fetch(url, { ...options, signal: controller.signal }); }
+  finally { clearTimeout(timer); }
+}
+
 function verifyPaddleSignature(rawBody, signature, secret) {
   if(!rawBody||!signature||!secret)return false;
   const parts=String(signature).split(';').reduce((out,part)=>{const i=part.indexOf('=');if(i>0){const key=part.slice(0,i),value=part.slice(i+1);if(key==='ts')out.ts=value;if(key==='h1')out.h1.push(value);}return out;},{ts:'',h1:[]});
@@ -43,7 +36,7 @@ function verifyPaddleSignature(rawBody, signature, secret) {
   return false;
 }
 
-async function createCheckout(req,res){
+export async function createCheckout(req,res){
   const apiKey=process.env.PADDLE_API_KEY;
   const requestedPlan=normalizePlan(req.body?.plan);
   const priceId=requestedPlan==='starter'?process.env.PADDLE_PRICE_STARTER:requestedPlan==='growth'?process.env.PADDLE_PRICE_GROWTH:requestedPlan==='scale'?process.env.PADDLE_PRICE_SCALE:null;
@@ -54,7 +47,7 @@ async function createCheckout(req,res){
   const body={items:[{price_id:priceId,quantity:1}],collection_mode:'automatic',custom_data:{sq_ai_user_id:String(req.user.id),sq_ai_plan:requestedPlan}};
   if(checkoutUrl)body.checkout={url:checkoutUrl};
   try{
-    const response=await fetch(`${paddleApiBase()}/transactions`,{method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const response=await paddleRequest(`${paddleApiBase()}/transactions`,{method:'POST',headers:{Authorization:`Bearer ${apiKey}`,'Content-Type':'application/json'},body:JSON.stringify(body)});
     const data=await response.json().catch(()=>({}));
     if(!response.ok){console.error('paddle_transaction_failed',response.status,data?.error?.code||data?.error?.detail||'unknown');return res.status(response.status>=400&&response.status<500?502:503).json({error:'paddle_transaction_failed'});}
     return res.json({ok:true,transaction_id:data?.data?.id||null,checkout_url:data?.data?.checkout?.url||null,plan:requestedPlan});
@@ -63,7 +56,7 @@ async function createCheckout(req,res){
 function findUserIdForSubscription(data){const direct=Number(data?.custom_data?.sq_ai_user_id||0);if(direct)return direct;const subscriptionId=String(data?.id||data?.subscription_id||'');if(!subscriptionId)return 0;return Number(billingDb.prepare('SELECT id FROM users WHERE paddle_subscription_id=?').get(subscriptionId)?.id||0);}
 async function paddleWebhook(req,res){
   const secret=process.env.PADDLE_WEBHOOK_SECRET,signature=req.get('paddle-signature')||'';
-  const rawBuffer=req.rawBody || (Buffer.isBuffer(req.body)?req.body:null);
+  const rawBuffer=Buffer.isBuffer(req.body)?req.body:null;
   const raw=rawBuffer?.toString('utf8')||'';
   if(!secret)return res.status(503).send('webhook_not_configured');
   if(!verifyPaddleSignature(raw,signature,secret))return res.status(400).send('invalid_signature');
@@ -77,7 +70,8 @@ async function paddleWebhook(req,res){
       if(eventType==='transaction.completed'){
         const custom=data.custom_data||{},userId=Number(custom.sq_ai_user_id||0),priceId=data?.items?.[0]?.price?.id||data?.items?.[0]?.price_id||'',plan=normalizePlan(custom.sq_ai_plan)||planForPrice(priceId);
         if(!userId||!plan||!creditsForPlan[plan])throw new Error('invalid_paddle_transaction_mapping');
-        billingDb.prepare(`UPDATE users SET plan=?,credits=?,paddle_subscription_id=COALESCE(?,paddle_subscription_id),billing_status='active' WHERE id=?`).run(plan,creditsForPlan[plan],data.subscription_id||null,userId);
+        const updated=billingDb.prepare(`UPDATE users SET plan=?,credits=?,paddle_subscription_id=COALESCE(?,paddle_subscription_id),billing_status='active' WHERE id=?`).run(plan,creditsForPlan[plan],data.subscription_id||null,userId);
+        if(!updated.changes)throw new Error('paddle_user_not_found');
       }
       if(eventType==='subscription.activated'){const userId=findUserIdForSubscription(data);if(userId)billingDb.prepare("UPDATE users SET billing_status='active' WHERE id=?").run(userId);}
       if(eventType==='subscription.canceled'||eventType==='subscription.past_due'){const userId=findUserIdForSubscription(data);if(userId)billingDb.prepare("UPDATE users SET billing_status=? WHERE id=?").run(eventType==='subscription.canceled'?'canceled':'past_due',userId);}
@@ -87,7 +81,6 @@ async function paddleWebhook(req,res){
     return res.status(200).send('ok');
   }catch(error){console.error('paddle_webhook_processing_failed',error?.message||error);return res.status(500).send('webhook_processing_failed');}
 }
-appPrototype.post=function patchedPost(route,...handlers){if(route==='/api/billing/checkout'&&handlers.length)return originalPost.call(this,route,...handlers.slice(0,-1),createCheckout);return originalPost.call(this,route,...handlers);};
 export function registerBillingWebhook(app) {
   app.post('/api/webhooks/paddle', express.raw({ type: 'application/json', limit: '256kb' }), paddleWebhook);
 }

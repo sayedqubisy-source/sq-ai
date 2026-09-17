@@ -66,7 +66,7 @@ export async function freeVideo(payload){
   const configuredBase=String(process.env.FREE_VIDEO_SPACE_URL || '').trim().replace(/\/$/,'');
   const base=configuredBase || `https://${space.replace(/\/$/,'').replace('/', '-').toLowerCase()}.hf.space`;
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),600000);
+  const timer=setTimeout(()=>controller.abort(),env.agentTimeoutMs);
   const headers={'Content-Type':'application/json',Accept:'application/json',...authHeaders()};
 
   try{
@@ -102,12 +102,14 @@ export async function freeVideo(payload){
     }
     if(!video?.ok)throw Object.assign(new Error(`Generated video download failed (${lastStatus}).`),{upstreamStatus:lastStatus});
 
+    const declaredSize=Number(video.headers.get('content-length') || 0);
+    if(declaredSize > env.maxMediaBytes)throw new Error('Generated video exceeds the configured size limit.');
     const bytes=Buffer.from(await video.arrayBuffer());
-    if(!bytes.length)throw new Error('Generated video download returned an empty file.');
+    if(!bytes.length || bytes.length > env.maxMediaBytes)throw new Error('Generated video returned an invalid file size.');
     const contentType=(video.headers.get('content-type') || '').toLowerCase();
     const head=bytes.slice(0,256).toString('utf8').toLowerCase();
     if(head.includes('<!doctype html') || head.includes('<html'))throw new Error('Generated video download returned an HTML error page.');
-    if(contentType.includes('json') || contentType.includes('text/html'))throw new Error('Generated video download returned an invalid response.');
+    if(contentType.includes('json') || contentType.includes('text/html') || !bytes.slice(0,64).includes(Buffer.from('ftyp')))throw new Error('Generated video download returned an invalid response.');
 
     const filename=`${Date.now()}-${crypto.randomBytes(8).toString('hex')}.mp4`;
     fs.writeFileSync(path.join(generatedVideoDir(),filename),bytes);
@@ -121,18 +123,3 @@ export async function freeVideo(payload){
     return new Response(JSON.stringify({error:{code:status===502?'free_video_bad_gateway':'free_video_unavailable',message:`Free video service is temporarily unavailable: ${detail}`}}),{status,headers:{'Content-Type':'application/json'}});
   }finally{clearTimeout(timer);}
 }
-
-globalThis.fetch=async function videoSafeFetch(input,init={}){
-  const url=typeof input==='string'?input:input?.url || '';
-  const method=String(init.method || 'GET').toUpperCase();
-  const headers=new Headers(init.headers || {});
-  const isLocalVideoBridge=headers.get('X-SQ-AI-Provider-Bridge')==='1';
-  if(url.endsWith('/api/v1/videos') && method==='POST' && typeof init.body==='string' && isLocalVideoBridge){
-    let payload;try{payload=JSON.parse(init.body);}catch{return previousFetch(input,init);}
-    if(!env.paidVideoEnabled)return freeVideo(payload);
-  }
-  return previousFetch(input,init);
-};
-
-process.env.FREE_VIDEO_DURATION_SECONDS=process.env.FREE_VIDEO_DURATION_SECONDS || '3';
-process.env.PAID_VIDEO_ENABLED=process.env.PAID_VIDEO_ENABLED || 'false';

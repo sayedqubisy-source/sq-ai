@@ -7,9 +7,10 @@ SQ AI is an AI creation workspace for content, ads, images, campaigns, and short
 - SQLite persistence with WAL
 - Cookie sessions and API-key authentication
 - Credits and usage metering
-- OpenRouter text and image generation
+- OpenRouter text generation with optional direct Gemini image generation
 - Free video generation through the public Hugging Face ZeroGPU Gradio Space
-- Video generation starts immediately from SQ AI without an internal video queue
+- Durable, user-scoped video jobs with automatic credit refunds on failure or restart
+- Music generation through the public Hugging Face MusicGen Space
 - Video size selection: 9:16 vertical, 16:9 landscape, and 1:1 square
 - Light application interface with persistent video-size preference
 - Optional Paddle billing integration, enabled when the required environment variables are configured
@@ -42,14 +43,14 @@ Open `http://localhost:3000`.
 - `GET /api/health`
 
 ## Free video mode
-The default configuration uses `alexcheng0072/wan27-free-video-generator` through Hugging Face Gradio's ZeroGPU API. SQ AI sends video generation directly to the external provider without adding its own internal queue. The external GPU service may still have its own scheduling, quota, or inference time.
+The default configuration uses `alexcheng0072/wan27-free-video-generator` through Hugging Face Gradio's ZeroGPU API. SQ AI records a lightweight job locally so the browser can poll progress safely. The external GPU service may still have its own scheduling, quota, downtime, or inference delay.
 
 Supported output sizes are mapped to the provider's available resolutions:
 - Vertical 9:16: 480x832
 - Landscape 16:9: 832x480
 - Square 1:1: 640x640
 
-Generated MP4 files are stored under the directory beside the SQLite database and served through `/generated-videos/`. The application removes generated files older than 24 hours.
+Generated MP4 files are validated, size-limited, stored under the directory beside the SQLite database, and served only to authenticated users through `/generated-videos/`. The application removes generated files and completed job records older than 24 hours.
 
 ## Billing
 Paddle checkout is wired through `billing-fix.mjs`. It requires the Paddle API key, webhook secret, and the three configured Paddle price IDs. When those variables are absent, checkout fails safely with a configuration error instead of pretending that payment is enabled.
@@ -60,8 +61,11 @@ Copy `.env.example` to your deployment environment and provide real provider cre
 ## Deployment
 Abasthan can auto-deploy the `main` branch. The application listens on `process.env.PORT` and `0.0.0.0` for reverse-proxy deployment.
 
-## Latest UI
-The startup UI patch injects the light theme and video-size selector into the served application and removes stale copies of the injected scripts before adding the current versions.
+## Media providers
+
+Text generation uses the first configured provider supported by `ai/runtime.mjs`. Image generation requires `GEMINI_API_KEY`. Music uses the public MusicGen Space by default and can use `HF_TOKEN` for authenticated Hugging Face requests. Free video does not call Veo even when a Gemini key is configured. Paid video requires `PAID_VIDEO_ENABLED=true` and either a custom video API or a Gemini key.
+
+All interface scripts are included directly in the static pages. Startup does not rewrite application source files.
 
 ## Maintenance checks
 
@@ -69,4 +73,4 @@ Run `npm test` for isolated regression tests and `npm run smoke` for the product
 
 Set `TRUST_PROXY=1` only when the application is behind one trusted reverse proxy. Direct deployments should retain `TRUST_PROXY=false`. Multiple proxy hops can be configured with a positive integer. The proxy must overwrite the forwarded headers.
 
-Free video mode does not call Veo even when a Gemini key is configured. Paid video requires `PAID_VIDEO_ENABLED=true` and either a custom video API or a Gemini key.
+The server exposes `/api/health`, handles `SIGTERM`/`SIGINT` gracefully, limits request and provider response sizes, applies rate limits and security headers, and returns safe production errors.
