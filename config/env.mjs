@@ -24,7 +24,7 @@ export const env = Object.freeze({
   isProduction: nodeEnv === 'production',
   sessionDays: number(process.env.SESSION_DAYS, 30, 365),
   requestTimeoutMs: number(process.env.REQUEST_TIMEOUT_MS, 180000, 600000),
-  agentTimeoutMs: number(process.env.AGENT_TIMEOUT_MS, 600000, 900000),
+  agentTimeoutMs: number(process.env.AGENT_TIMEOUT_MS, 900000, 900000),
   maxMediaBytes: number(process.env.MAX_MEDIA_BYTES, 250 * 1024 * 1024, 1024 * 1024 * 1024),
   paidVideoEnabled: Boolean(falKey) || bool(process.env.PAID_VIDEO_ENABLED),
   freeVideoModel: process.env.FREE_VIDEO_SPACE || 'alexcheng0072/wan27-free-video-generator',

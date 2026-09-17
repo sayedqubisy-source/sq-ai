@@ -7,6 +7,15 @@ globalThis.fetch = async (input, init = {}) => {
   const falBase = 'https://queue.fal.run/fal-ai/wan/v2.2-a14b/text-to-video/turbo';
   const falImageBase = 'https://queue.fal.run/fal-ai/wan/v2.2-a14b/image-to-video/turbo';
   const falQueue = 'https://queue.fal.run/fal-ai/wan';
+  if (url === 'https://rest.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3') {
+    const body = JSON.parse(init.body);
+    if (body.content_type !== 'image/png') throw new Error('Invalid fal storage upload contract');
+    return Response.json({ upload_url: 'https://upload.test/fal-image', file_url: 'https://fal.media/test-source.png' });
+  }
+  if (url === 'https://upload.test/fal-image') {
+    if (init.method !== 'PUT' || !(init.body instanceof Blob)) throw new Error('Invalid fal storage body');
+    return Response.json({ ok: true });
+  }
   if (url === falBase) {
     const body = JSON.parse(init.body);
     if (body.resolution !== '720p' || !['16:9', '9:16', '1:1'].includes(body.aspect_ratio) || body.enable_prompt_expansion !== true) throw new Error('Invalid fal Wan Turbo contract');
@@ -14,7 +23,7 @@ globalThis.fetch = async (input, init = {}) => {
   }
   if (url === falImageBase) {
     const body = JSON.parse(init.body);
-    if (!body.image_url?.startsWith('data:image/png;base64,') || body.aspect_ratio !== 'auto' || body.enable_prompt_expansion !== true) throw new Error('Invalid fal Wan image-to-video contract');
+    if (body.image_url !== 'https://fal.media/test-source.png' || body.aspect_ratio !== 'auto' || body.enable_prompt_expansion !== true) throw new Error('Invalid fal Wan image-to-video contract');
     return Response.json({ request_id: 'fal-image-event', status: 'IN_QUEUE' });
   }
   if (url.startsWith(`${falQueue}/requests/fal-event/status`)) return Response.json({ status: 'COMPLETED', logs: [] });
