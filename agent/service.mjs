@@ -94,7 +94,9 @@ export async function generateVideo(prompt, options = {}) {
         aspect_ratio: aspectRatio,
         enable_safety_checker: true,
         enable_output_safety_checker: true,
-        enable_prompt_expansion: false,
+        // Fal's expansion step also normalizes multilingual prompts for the
+        // video model. This is important for short Arabic product requests.
+        enable_prompt_expansion: true,
         acceleration: 'regular',
         video_quality: 'high',
         video_write_mode: 'fast',

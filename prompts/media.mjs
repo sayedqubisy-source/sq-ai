@@ -12,9 +12,9 @@ export function enhanceMediaPrompt(tool, idea, body = {}) {
   const language = clean(body.language, 50) || 'auto';
   const ratio = clean(body.aspectRatio, 20);
   const context = `USER IDEA:\n${userIdea}\n\nTOOL: ${tool}\nPLATFORM: ${platform}\nLANGUAGE: ${language}${ratio ? `\nASPECT RATIO: ${ratio}` : ''}`;
-  const common = 'Create the requested output directly. Preserve the user intent. Keep it coherent, specific, production-ready, and free of watermarks, random text, logos, or unrelated objects unless explicitly requested.';
+  const common = 'Create the requested output directly. Treat USER IDEA as an exact visual checklist: preserve every requested subject, product, clothing item, color, motif, action, and setting. Never replace the main subject with a generic person or unrelated scene. Keep it coherent, specific, production-ready, and free of watermarks, random text, logos, or unrelated objects unless explicitly requested.';
   if (IMAGE_TOOLS.has(tool)) return `${context}\n\n${common}\nDefine subject, composition, environment, camera, lighting, materials, colors, depth, style, background, and aspect ratio. Keep products consistent and people anatomically natural.`;
-  if (VIDEO_TOOLS.has(tool)) return `${context}\n\n${common}\nDefine continuous action, setting, shot, camera movement, lighting, atmosphere, realistic physics, continuity, timing, and transitions. Keep the main subject consistent from start to finish.`;
+  if (VIDEO_TOOLS.has(tool)) return `${context}\n\n${common}\nIf USER IDEA is not English, interpret it precisely and express the visual concepts in clear English for the video model without changing its meaning. Define continuous action, setting, shot, camera movement, lighting, atmosphere, realistic physics, continuity, timing, and transitions. Show the requested subject clearly in the opening frame and keep it consistent from start to finish.`;
   if (MUSIC_TOOLS.has(tool)) return `${context}\n\n${common}\nDefine genre, mood, tempo, instrumentation, rhythm, structure, dynamics, vocals, and mix character. Keep the composition original.`;
   return userIdea;
 }
