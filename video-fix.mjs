@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { env } from './config/env.mjs';
 
 const previousFetch = globalThis.fetch;
 const DEFAULT_NEGATIVE_PROMPT = 'nsfw, nudity, explicit content, watermark, text, signature, subtitles, low quality, blurry, deformed, disfigured, static frame';
@@ -12,7 +13,7 @@ function platformDimensions(platform) {
   return { width:480, height:832 };
 }
 function generatedVideoDir() {
-  const dbPath=process.env.DB_PATH || '/app/data/sq-ai.sqlite';
+  const dbPath=process.env.DB_PATH || './data/sq-ai.sqlite';
   const dir=path.join(path.dirname(path.resolve(dbPath)),'generated-videos');
   fs.mkdirSync(dir,{recursive:true});
   return dir;
@@ -67,10 +68,10 @@ async function requestWithRetry(url,options={},controller,maxAttempts=5){
   throw lastError || new Error('Hugging Face request failed.');
 }
 
-async function freeVideo(payload){
+export async function freeVideo(payload){
   const space=process.env.FREE_VIDEO_SPACE || 'alexcheng0072/wan27-free-video-generator';
   const configuredBase=String(process.env.FREE_VIDEO_SPACE_URL || '').trim().replace(/\/$/,'');
-  const base=configuredBase || `https://${space.replace(/\/$/,'')}.hf.space`;
+  const base=configuredBase || `https://${space.replace(/\/$/,'').replace('/', '-').toLowerCase()}.hf.space`;
   const {width,height}=platformDimensions(payload.platform);
   const prompt=String(payload.prompt || '').trim().slice(0,600);
   const duration=Math.min(5,Math.max(2,Number(process.env.FREE_VIDEO_DURATION_SECONDS || 3)));
@@ -150,7 +151,7 @@ globalThis.fetch=async function videoSafeFetch(input,init={}){
   const isLocalVideoBridge=headers.get('X-SQ-AI-Provider-Bridge')==='1';
   if(url.endsWith('/api/v1/videos') && method==='POST' && typeof init.body==='string' && isLocalVideoBridge){
     let payload;try{payload=JSON.parse(init.body);}catch{return previousFetch(input,init);}
-    if(process.env.PAID_VIDEO_ENABLED!=='true')return freeVideo(payload);
+    if(!env.paidVideoEnabled)return freeVideo(payload);
   }
   return previousFetch(input,init);
 };

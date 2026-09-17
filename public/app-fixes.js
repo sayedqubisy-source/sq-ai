@@ -2,7 +2,7 @@
   'use strict';
 
   const VIDEO_RE = /(?:\/generated-videos\/|\.(?:mp4|webm|mov)(?:[?#].*)?$)/i;
-  const IMAGE_RE = /^(?:data:image\/(?:png|jpe?g|webp|gif);base64,|https?:\/\/.*\.(?:png|jpe?g|webp|gif)(?:[?#].*)?$|\/generated-images\/)/i;
+  const IMAGE_RE = /^(?:data:image\/(?:png|jpe?g|webp|gif);base64,|https?:\/\/.*\.(?:png|jpe?g|webp|gif)(?:[?#].*)?$|\/(?:generated-images|generated-media)\/)/i;
 
   function normalizeUrl(value) {
     if (!value) return '';
@@ -156,7 +156,7 @@
       if (response.status !== 202) return response;
       let payload;
       try { payload = await response.clone().json(); } catch { return response; }
-      if (!payload?.async || !payload?.job_id) return response;
+      if (!payload?.job_id) return response;
 
       const jobId = payload.job_id;
       const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -188,7 +188,7 @@
           continue;
         }
         if (job?.status === 'completed' && job?.video_url) {
-          return new Response(JSON.stringify({ result:job.video_url, video_url:job.video_url, provider:job.provider || 'huggingface-zero-gpu', free:true, credits_remaining:job.credits_remaining }), { status:200, headers:{'Content-Type':'application/json'} });
+          return new Response(JSON.stringify({ result:job.video_url, video_url:job.video_url, provider:job.provider || 'huggingface-zero-gpu', free:job.provider === 'huggingface-zero-gpu', credits_remaining:job.credits_remaining }), { status:200, headers:{'Content-Type':'application/json'} });
         }
         if (job?.status === 'failed') {
           return new Response(JSON.stringify({ error:job.error || 'video_generation_failed', message:describeVideoError(job), credits_remaining:job.credits_remaining }), { status:502, headers:{'Content-Type':'application/json'} });

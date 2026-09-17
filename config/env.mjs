@@ -5,16 +5,18 @@ const bool = (value, fallback = false) => {
   return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
 };
 
-const number = (value, fallback) => {
+const number = (value, fallback, max = Number.MAX_SAFE_INTEGER) => {
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= max ? parsed : fallback;
 };
 
 const dbPath = process.env.DB_PATH || './data/sq-ai.sqlite';
 
 export const env = Object.freeze({
   nodeEnv: process.env.NODE_ENV || 'development',
-  port: number(process.env.PORT, 3000),
+  port: number(process.env.PORT, 3000, 65535),
+  // Trust only the configured number of reverse-proxy hops; default to none.
+  trustProxy: process.env.TRUST_PROXY === 'true' ? 1 : number(process.env.TRUST_PROXY, false, 16),
   dbPath,
   dbDirectory: path.dirname(path.resolve(dbPath)),
   isProduction: (process.env.NODE_ENV || 'development') === 'production',
@@ -26,7 +28,7 @@ export const env = Object.freeze({
   freeVideoDuration: number(process.env.FREE_VIDEO_DURATION_SECONDS, 3),
   mediaPromptEnhancer: bool(process.env.MEDIA_PROMPT_ENHANCER, true),
   geminiKey: process.env.GEMINI_API_KEY || '',
-  geminiTextModel: process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash',
+  geminiTextModel: process.env.GEMINI_TEXT_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash',
   geminiImageModel: process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image',
   veoModel: process.env.VEO_MODEL || 'veo-3.1-generate-preview',
   elevenLabsKey: process.env.ELEVENLABS_API_KEY || '',

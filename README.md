@@ -18,7 +18,7 @@ SQ AI is an AI creation workspace for content, ads, images, campaigns, and short
 
 ## Run locally
 ```bash
-npm install
+npm ci
 npm start
 ```
 Open `http://localhost:3000`.
@@ -28,7 +28,6 @@ Open `http://localhost:3000`.
 - `POST /api/auth/login`
 - `POST /api/auth/logout`
 - `GET /api/me`
-- `POST /api/auth/set-password`
 - `PATCH /api/account`
 - `GET /api/usage`
 - `GET /api/projects`
@@ -63,3 +62,11 @@ Abasthan can auto-deploy the `main` branch. The application listens on `process.
 
 ## Latest UI
 The startup UI patch injects the light theme and video-size selector into the served application and removes stale copies of the injected scripts before adding the current versions.
+
+## Maintenance checks
+
+Run `npm test` for isolated regression tests and `npm run smoke` for the production startup check. The regression suite uses mocked AI providers and a temporary database; it does not spend provider credits or change customer data. CI also builds and health-checks the Docker image.
+
+Set `TRUST_PROXY=1` only when the application is behind one trusted reverse proxy. Direct deployments should retain `TRUST_PROXY=false`. Multiple proxy hops can be configured with a positive integer. The proxy must overwrite the forwarded headers.
+
+Free video mode does not call Veo even when a Gemini key is configured. Paid video requires `PAID_VIDEO_ENABLED=true` and either a custom video API or a Gemini key.

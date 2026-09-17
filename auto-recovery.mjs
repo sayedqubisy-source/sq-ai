@@ -48,7 +48,7 @@ function cleanupDir(dir, cutoff) {
 
 setInterval(() => {
   try {
-    const dbPath = process.env.DB_PATH || '/app/data/sq-ai.sqlite';
+    const dbPath = process.env.DB_PATH || './data/sq-ai.sqlite';
     const root = path.dirname(path.resolve(dbPath));
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     cleanupDir(path.join(root, 'generated-videos'), cutoff);

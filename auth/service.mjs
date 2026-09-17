@@ -53,7 +53,7 @@ export async function hashPassword(value) {
 }
 
 export async function verifyPassword(value, stored) {
-  if (!stored?.startsWith('scrypt:')) return false;
+  if (typeof stored !== 'string' || !/^scrypt:[a-f0-9]{32}:[a-f0-9]{128}$/i.test(stored)) return false;
   const [, saltHex, expectedHex] = stored.split(':');
   if (!saltHex || !expectedHex) return false;
   const expected = Buffer.from(expectedHex, 'hex');

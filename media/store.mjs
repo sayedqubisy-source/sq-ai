@@ -15,11 +15,10 @@ export function saveBuffer(prefix, extension, value, directory = mediaRoot) {
 }
 
 export function localPath(publicUrl) {
-  if (!String(publicUrl).startsWith('/generated-')) return null;
-  const relative = String(publicUrl).replace(/^\/(generated-media|generated-videos)\//, '$1/');
-  const resolved = path.resolve(env.dbDirectory, relative);
-  const root = path.resolve(env.dbDirectory);
-  if (!resolved.startsWith(`${root}${path.sep}`)) return null;
+  const match = /^\/(generated-media|generated-videos)\/([A-Za-z0-9_-][A-Za-z0-9._-]*)$/.exec(String(publicUrl));
+  if (!match) return null;
+  const root = match[1] === 'generated-media' ? mediaRoot : videoRoot;
+  const resolved = path.resolve(root, match[2]);
   return resolved;
 }
 
